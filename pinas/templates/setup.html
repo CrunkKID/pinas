@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Einrichtung{% endblock %}
+{% block mainclass %}login-wrap{% endblock %}
+{% block content %}
+<form method="post" class="card login">
+  <div class="brand big"><span class="logo"></span>PiNAS</div>
+  <p class="muted" style="margin:0">Willkommen! Lege das Administrator-Konto an. Es gilt für diese
+    Weboberfläche und für das Netzlaufwerk.</p>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Benutzername<input name="username" pattern="[a-z][a-z0-9_\-]{1,31}" autocapitalize="none"
+    placeholder="z. B. patrick" required autofocus></label>
+  <label>Passwort<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+  <label>Wiederholen<input name="confirm" type="password" minlength="8" autocomplete="new-password" required></label>
+  <button class="primary">Einrichten</button>
+</form>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Laufwerk{% endblock %}
+{% block content %}
+<h1>Laufwerk</h1>
+
+{% if source %}
+<div class="flash ok">NAS-Speicher: <b>{{ source }}</b> ist unter {{ data_dir }} eingehängt.</div>
+{% else %}
+<div class="flash error">Noch keine Festplatte eingerichtet – Daten liegen auf der SD-Karte.
+  Schließe eine USB-Platte an und wähle sie unten aus.</div>
+{% endif %}
+
+{% for d in disks %}
+<div class="card">
+  <strong>/dev/{{ d.name }}</strong> <span class="muted">{{ d.model }} · {{ d.tran|upper }} · {{ d.size|filesize }}</span>
+  {% if d.parts %}
+  <table class="list compact">
+    <thead><tr><th>Partition</th><th>Dateisystem</th><th class="num">Größe</th><th>Eingehängt</th><th></th></tr></thead>
+    <tbody>
+    {% for p in d.parts %}
+      <tr>
+        <td>{{ p.name }}{% if p.label %} <small class="muted">({{ p.label }})</small>{% endif %}</td>
+        <td>{{ p.fstype }}</td><td class="num">{{ p.size|filesize }}</td><td>{{ p.mount or '–' }}</td>
+        <td class="actions">
+          {% if p.fstype == 'ext4' and not p.mount %}
+          <form method="post" action="{{ url_for('disk.use') }}" class="inline disk-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="device" value="{{ p.name }}">
+            <input type="hidden" name="mode" value="keep">
+            <button class="btn-sm" title="Vorhandene Daten bleiben erhalten">Verwenden</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if d.parts|selectattr('mount')|list %}
+  <p class="muted">Diese Platte ist in Benutzung.</p>
+  {% else %}
+  <form method="post" action="{{ url_for('disk.use') }}" class="format-form disk-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="device" value="{{ d.name }}">
+    <input type="hidden" name="mode" value="format">
+    <label>Formatieren löscht <b>alle Daten</b> auf dieser Platte. Zum Bestätigen „{{ d.name }}“ eintippen:
+      <input name="confirm" autocomplete="off" placeholder="{{ d.name }}" required></label>
+    <button class="danger">Formatieren &amp; verwenden</button>
+  </form>
+  {% endif %}
+</div>
+{% else %}
+<p class="muted">Keine USB-Festplatte gefunden. Platte anschließen und Seite neu laden.</p>
+{% endfor %}
+
+<p class="muted">Dateien, die bisher auf der SD-Karte lagen, werden beim Einrichten auf die Platte kopiert.
+  Formatieren dauert meist unter einer Minute.</p>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.querySelectorAll(".disk-form").forEach((f) => f.addEventListener("submit", () => {
+    f.querySelector("button").disabled = true;
+    f.querySelector("button").textContent = "Bitte warten …";
+  }));
+</script>
+{% endblock %}

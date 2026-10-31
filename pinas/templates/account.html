@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Konto{% endblock %}
+{% block content %}
+<h1>Konto: {{ user.username }}</h1>
+
+<div class="card">
+  <h2>Netzlaufwerk verbinden</h2>
+  <p>Windows-Explorer → Adresszeile: <code>\\{{ request.host.split(':')[0] }}\Privat</code> bzw. <code>\\{{ request.host.split(':')[0] }}\Gemeinsam</code></p>
+  <p>macOS Finder → „Mit Server verbinden“: <code>smb://{{ request.host.split(':')[0] }}/Privat</code></p>
+  <p class="muted">Anmeldung mit Benutzername <b>{{ user.username }}</b> und deinem Passwort.</p>
+</div>
+
+<h2>Passwort ändern</h2>
+<form method="post" class="card form-grid">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Aktuelles Passwort<input name="current" type="password" autocomplete="current-password" required></label>
+  <label>Neues Passwort<input name="new" type="password" minlength="8" autocomplete="new-password" required></label>
+  <label>Wiederholen<input name="confirm" type="password" minlength="8" autocomplete="new-password" required></label>
+  <button class="primary">Ändern</button>
+</form>
+{% endblock %}

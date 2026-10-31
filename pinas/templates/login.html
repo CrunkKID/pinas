@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Anmelden{% endblock %}
+{% block mainclass %}login-wrap{% endblock %}
+{% block content %}
+<form method="post" class="card login">
+  <div class="brand big"><span class="logo"></span>PiNAS</div>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Benutzername<input name="username" autocomplete="username" autocapitalize="none" required autofocus></label>
+  <label>Passwort<input name="password" type="password" autocomplete="current-password" required></label>
+  <button class="primary">Anmelden</button>
+</form>
+{% endblock %}

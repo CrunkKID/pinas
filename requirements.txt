@@ -1,0 +1,4 @@
+# Auf dem Pi kommen diese aus den Debian-Paketen python3-flask / python3-waitress.
+# Diese Datei ist nur für lokale Tests (python run_dev.py).
+Flask>=2.2
+waitress>=2.1

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Dateien{% endblock %}
+{% block content %}
+<div class="files-head">
+  <div class="tabs">
+    {% for key, label in roots.items() %}
+      <a href="{{ url_for('files.browse', root=key) }}" class="{{ 'active' if key == root }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <div class="usage" title="{{ usage.used|filesize }} von {{ usage.total|filesize }} belegt">
+    <div class="bar"><span style="width: {{ (usage.used / usage.total * 100)|round(1) if usage.total else 0 }}%"></span></div>
+    <small>{{ usage.free|filesize }} frei</small>
+  </div>
+</div>
+
+<nav class="crumbs">
+  <a href="{{ url_for('files.browse', root=root) }}">{{ roots[root] }}</a>
+  {% for name, path in crumbs %}<span>/</span><a href="{{ url_for('files.browse', root=root, sub=path) }}">{{ name }}</a>{% endfor %}
+</nav>
+
+<div class="toolbar">
+  <label class="button primary">
+    Hochladen<input type="file" id="file-input" multiple hidden>
+  </label>
+  <form method="post" action="{{ url_for('files.mkdir', root=root) }}" class="inline" id="mkdir-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="dir" value="{{ sub }}">
+    <input type="hidden" name="name">
+    <button type="button" id="mkdir-btn">Neuer Ordner</button>
+  </form>
+</div>
+
+<div id="dropzone" class="dropzone" data-upload="{{ url_for('files.upload', root=root) }}" data-dir="{{ sub }}">
+  <div id="progress" class="progress" hidden><span></span><small></small></div>
+  {% if entries %}
+  <table class="list">
+    <thead><tr><th>Name</th><th class="num">Größe</th><th class="hide-sm">Geändert</th><th></th></tr></thead>
+    <tbody>
+    {% for e in entries %}
+      <tr>
+        <td class="name">
+          <span class="icon {{ 'dir' if e.is_dir else 'file' }}"></span>
+          <a href="{{ url_for('files.browse', root=root, sub=e.path) }}"{% if not e.is_dir %} target="_blank"{% endif %}>{{ e.name }}</a>
+        </td>
+        <td class="num">{{ e.size|filesize if not e.is_dir else '' }}</td>
+        <td class="hide-sm muted">{{ e.mtime }}</td>
+        <td class="actions">
+          {% if not e.is_dir %}<a class="btn-sm" href="{{ url_for('files.browse', root=root, sub=e.path, dl=1) }}" title="Herunterladen">⬇</a>{% endif %}
+          <button class="btn-sm" data-rename="{{ e.path }}" data-name="{{ e.name }}" title="Umbenennen">✎</button>
+          <button class="btn-sm danger" data-delete="{{ e.path }}" data-name="{{ e.name }}" title="Löschen">🗑</button>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">Dieser Ordner ist leer. Dateien hierher ziehen oder „Hochladen“ wählen.</p>
+  {% endif %}
+</div>
+
+<form method="post" id="action-form" hidden>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="dir" value="{{ sub }}">
+  <input type="hidden" name="path">
+  <input type="hidden" name="name">
+</form>
+<span id="urls" hidden data-rename-url="{{ url_for('files.rename', root=root) }}" data-delete-url="{{ url_for('files.delete', root=root) }}"></span>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='files.js') }}"></script>{% endblock %}

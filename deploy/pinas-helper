@@ -1,0 +1,154 @@
+#!/bin/bash
+# Privilegiertes Hilfsskript für PiNAS. Wird vom Dienstbenutzer "pinas" per sudo aufgerufen
+# und darf ausschließlich NAS-Benutzer und das NAS-Datenlaufwerk verwalten.
+#   pinas-helper add-user NAME           (Passwort über stdin)
+#   pinas-helper set-password NAME       (Passwort über stdin)
+#   pinas-helper delete-user NAME
+#   pinas-helper use-disk /dev/sdX format   (Platte löschen, ext4 anlegen, als NAS-Speicher einhängen)
+#   pinas-helper use-disk /dev/sdX1 keep    (vorhandene ext4-Partition einhängen)
+set -euo pipefail
+
+GROUP="nasusers"
+MARK="pinas-managed"
+PINAS_DATA="/srv/nas"
+# shellcheck disable=SC1091
+[[ -r /etc/default/pinas ]] && . /etc/default/pinas
+DATA="$PINAS_DATA"
+
+die() { echo "$*" >&2; exit 1; }
+
+# ---------------------------------------------------------------- Benutzer
+
+check_user_name() {
+  [[ "$name" =~ ^[a-z][a-z0-9_-]{1,31}$ ]] || die "Ungültiger Benutzername"
+  case "$name" in
+    root|pinas|daemon|bin|sys|sync|games|man|lp|mail|news|uucp|proxy|www-data|backup|list|irc|nobody|sshd|avahi|nasusers)
+      die "Reservierter Benutzername" ;;
+  esac
+  # Bestehende Systemkonten (UID < 1000), die nicht von PiNAS stammen, niemals anfassen
+  if id "$name" &>/dev/null; then
+    local uid gecos
+    uid="$(id -u "$name")"
+    gecos="$(getent passwd "$name" | cut -d: -f5)"
+    if (( uid < 1000 )) && [[ "$gecos" != "$MARK" ]]; then
+      die "Systemkonto '$name' darf nicht verwendet werden"
+    fi
+  fi
+}
+
+read_password() {
+  IFS= read -r pw || true
+  (( ${#pw} >= 8 )) || die "Passwort zu kurz"
+}
+
+set_smb_password() {
+  printf '%s\n%s\n' "$pw" "$pw" | smbpasswd -s -a "$name" >/dev/null
+  smbpasswd -e "$name" >/dev/null
+}
+
+# ---------------------------------------------------------------- Laufwerk
+
+use_disk() {
+  local dev="$1" mode="$2" part fstype root_disk tmp uuid
+  [[ "$dev" =~ ^/dev/(sd[a-z]+[0-9]*|nvme[0-9]+n[0-9]+(p[0-9]+)?)$ ]] || die "Ungültiges Gerät: $dev"
+  [[ -b "$dev" ]] || die "Gerät $dev nicht gefunden"
+
+  root_disk="$(lsblk -no PKNAME "$(findmnt -no SOURCE /)")"
+  local own_disk
+  own_disk="$(lsblk -no PKNAME "$dev" | head -n1)"
+  [[ -z "$own_disk" ]] && own_disk="${dev#/dev/}"
+  [[ "$own_disk" != "$root_disk" && "${dev#/dev/}" != "$root_disk" ]] || die "Das Systemlaufwerk darf nicht verwendet werden"
+  if lsblk -no MOUNTPOINT "$dev" | grep -q .; then
+    die "$dev ist bereits eingehängt"
+  fi
+
+  case "$mode" in
+    format)
+      [[ "$(lsblk -dno TYPE "$dev")" == "disk" ]] || die "Zum Formatieren bitte die ganze Platte wählen"
+      wipefs -a "$dev" >/dev/null
+      printf 'label: gpt\n,,L\n' | sfdisk --quiet "$dev"
+      udevadm settle
+      [[ "$dev" =~ [0-9]$ ]] && part="${dev}p1" || part="${dev}1"
+      for _ in 1 2 3 4 5; do [[ -b "$part" ]] && break; sleep 1; done
+      mkfs.ext4 -q -F -L pinas "$part"
+      ;;
+    keep)
+      [[ "$(lsblk -dno TYPE "$dev")" == "part" ]] || die "Bitte eine Partition wählen"
+      fstype="$(blkid -s TYPE -o value "$dev" || true)"
+      [[ "$fstype" == "ext4" ]] || die "Nur ext4-Partitionen können übernommen werden (gefunden: ${fstype:-keins})"
+      part="$dev"
+      ;;
+    *) die "Unbekannter Modus: $mode" ;;
+  esac
+
+  uuid="$(blkid -s UUID -o value "$part")"
+  [[ -n "$uuid" ]] || die "Keine UUID für $part gefunden"
+
+  # Neue Platte vorbereiten und bisherige Daten (z. B. von der SD-Karte) hinüberkopieren
+  tmp="$(mktemp -d /mnt/pinas-new.XXXXXX)"
+  mount "$part" "$tmp"
+  mkdir -p "$tmp/users" "$tmp/shared" "$tmp/.tmp"
+  for d in users shared; do
+    [[ -d "$DATA/$d" ]] && rsync -a --ignore-existing "$DATA/$d/" "$tmp/$d/"
+  done
+  chown pinas:pinas "$tmp" "$tmp/.tmp"
+  chown -R pinas:pinas "$tmp/users" "$tmp/shared"
+  chmod 0770 "$tmp" "$tmp/users" "$tmp/shared" "$tmp/.tmp"
+  umount "$tmp"
+  rmdir "$tmp"
+
+  # Umschalten
+  systemctl stop smbd || true
+  if mountpoint -q "$DATA"; then
+    umount "$DATA" || umount -l "$DATA"
+  fi
+  sed -i "\|[[:space:]]${DATA}[[:space:]]|d" /etc/fstab
+  # nofail: Der Pi startet auch, wenn die Platte fehlt
+  echo "UUID=$uuid  $DATA  ext4  defaults,noatime,nofail,x-systemd.device-timeout=15  0  2" >> /etc/fstab
+  systemctl daemon-reload
+  mount "$DATA"
+  systemctl start smbd || true
+}
+
+# ---------------------------------------------------------------- Befehle
+
+cmd="${1:-}"
+case "$cmd" in
+  add-user|set-password|delete-user)
+    [[ $# -eq 2 ]] || die "Aufruf: pinas-helper $cmd NAME"
+    name="$2"
+    check_user_name
+    ;;
+  use-disk)
+    [[ $# -eq 3 ]] || die "Aufruf: pinas-helper use-disk GERÄT format|keep"
+    use_disk "$2" "$3"
+    exit 0
+    ;;
+  *)
+    die "Unbekannter Befehl: $cmd" ;;
+esac
+
+case "$cmd" in
+  add-user)
+    read_password
+    if ! id "$name" &>/dev/null; then
+      useradd --system --no-create-home --shell /usr/sbin/nologin --comment "$MARK" "$name"
+    fi
+    usermod -aG "$GROUP" "$name"
+    set_smb_password
+    ;;
+  set-password)
+    read_password
+    id "$name" &>/dev/null || die "Unbekannter Benutzer"
+    set_smb_password
+    ;;
+  delete-user)
+    smbpasswd -x "$name" &>/dev/null || true
+    if id "$name" &>/dev/null; then
+      gpasswd -d "$name" "$GROUP" &>/dev/null || true
+      if [[ "$(getent passwd "$name" | cut -d: -f5)" == "$MARK" ]]; then
+        userdel "$name"
+      fi
+    fi
+    ;;
+esac

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Benutzer{% endblock %}
+{% block content %}
+<h1>Benutzer</h1>
+<p class="muted">Jeder Benutzer kann sich mit denselben Zugangsdaten hier und am Netzlaufwerk anmelden
+  (Freigaben <b>Privat</b> und <b>Gemeinsam</b>).</p>
+
+<div class="card">
+  <table class="list">
+    <thead><tr><th>Name</th><th>Rolle</th><th class="hide-sm">Angelegt</th><th></th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr>
+        <td>{{ u.username }}</td>
+        <td>{{ 'Admin' if u.is_admin else 'Benutzer' }}</td>
+        <td class="hide-sm muted">{{ u.created_at[:10] }}</td>
+        <td class="actions">
+          <form method="post" action="{{ url_for('admin.password', username=u.username) }}" class="inline pw-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="password" name="password" placeholder="Neues Passwort" minlength="8" required>
+            <button class="btn-sm">Setzen</button>
+          </form>
+          {% if u.username != user.username %}
+          <form method="post" action="{{ url_for('admin.delete', username=u.username) }}" class="inline"
+                onsubmit="return confirm('Benutzer {{ u.username }} wirklich löschen? Der private Ordner bleibt erhalten.')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn-sm danger">Löschen</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Neuer Benutzer</h2>
+<form method="post" action="{{ url_for('admin.create') }}" class="card form-grid">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Benutzername<input name="username" pattern="[a-z][a-z0-9_\-]{1,31}" autocapitalize="none" required></label>
+  <label>Passwort<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+  <label>Wiederholen<input name="confirm" type="password" minlength="8" autocomplete="new-password" required></label>
+  <label class="check"><input type="checkbox" name="is_admin" value="1"> Administrator</label>
+  <button class="primary">Anlegen</button>
+</form>
+{% endblock %}

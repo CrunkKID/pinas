@@ -1,0 +1,171 @@
+"""Dateibrowser: Auflisten, Hoch-/Herunterladen, Ordner anlegen, Umbenennen, Löschen."""
+import os
+import shutil
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from flask import (Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template,
+                   request, send_file, url_for)
+
+from .auth import login_required
+
+bp = Blueprint("files", __name__)
+
+ROOTS = {"privat": "Privat", "gemeinsam": "Gemeinsam"}
+_FORBIDDEN_CHARS = set('/\\\0')
+
+
+def root_dir(root: str) -> Path:
+    if root == "privat":
+        base = current_app.config["USERS_DIR"] / g.user["username"]
+    elif root == "gemeinsam":
+        base = current_app.config["SHARED_DIR"]
+    else:
+        abort(404)
+    base.mkdir(parents=True, exist_ok=True)
+    return base.resolve()
+
+
+def resolve(root: str, sub: str) -> tuple[Path, Path]:
+    """Löst einen Pfad relativ zum Wurzelordner auf und verhindert Ausbrüche (../, Symlinks)."""
+    base = root_dir(root)
+    target = (base / (sub or "").strip("/")).resolve()
+    if target != base and base not in target.parents:
+        abort(403)
+    return base, target
+
+
+def clean_name(name: str) -> str:
+    name = (name or "").strip()
+    if not name or name in (".", "..") or any(c in _FORBIDDEN_CHARS for c in name) or len(name) > 255:
+        raise ValueError(f"Ungültiger Name: „{name}“")
+    return name
+
+
+def unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    stem, suffix = path.stem, path.suffix
+    for i in range(1, 10_000):
+        candidate = path.with_name(f"{stem} ({i}){suffix}")
+        if not candidate.exists():
+            return candidate
+    raise ValueError("Kein freier Dateiname gefunden.")
+
+
+def rel(base: Path, path: Path) -> str:
+    return path.relative_to(base).as_posix() if path != base else ""
+
+
+def back_to(root: str, sub: str):
+    return redirect(url_for("files.browse", root=root, sub=sub))
+
+
+@bp.get("/dateien/<root>/")
+@bp.get("/dateien/<root>/<path:sub>")
+@login_required
+def browse(root, sub=""):
+    base, target = resolve(root, sub)
+    if target.is_file():
+        return send_file(target, as_attachment=request.args.get("dl") == "1", conditional=True)
+    if not target.is_dir():
+        abort(404)
+
+    entries = []
+    with os.scandir(target) as it:
+        for e in it:
+            try:
+                st = e.stat()
+            except OSError:
+                continue
+            is_dir = e.is_dir()
+            entries.append({
+                "name": e.name,
+                "path": rel(base, Path(e.path)),
+                "is_dir": is_dir,
+                "size": None if is_dir else st.st_size,
+                "mtime": datetime.fromtimestamp(st.st_mtime).strftime("%d.%m.%Y %H:%M"),
+            })
+    entries.sort(key=lambda x: (not x["is_dir"], x["name"].casefold()))
+
+    crumbs, acc = [], []
+    for part in Path(rel(base, target)).parts:
+        acc.append(part)
+        crumbs.append((part, "/".join(acc)))
+
+    usage = shutil.disk_usage(current_app.config["DATA_DIR"])
+    return render_template("files.html", root=root, roots=ROOTS, sub=rel(base, target),
+                           entries=entries, crumbs=crumbs, usage=usage)
+
+
+@bp.post("/dateien/<root>/upload")
+@login_required
+def upload(root):
+    _, target = resolve(root, request.form.get("dir", ""))
+    if not target.is_dir():
+        return jsonify(error="Zielordner existiert nicht."), 400
+    saved, errors = [], []
+    for f in request.files.getlist("files"):
+        try:
+            name = clean_name(os.path.basename((f.filename or "").replace("\\", "/")))
+            dest = unique_path(target / name)
+            tmp = target / f".pinas-upload-{uuid.uuid4().hex}"
+            try:
+                f.save(tmp)
+                os.replace(tmp, dest)
+            finally:
+                tmp.unlink(missing_ok=True)
+            saved.append(dest.name)
+        except (ValueError, OSError) as exc:
+            errors.append(f"{f.filename}: {exc}")
+    return jsonify(saved=saved, errors=errors), (200 if not errors else 207)
+
+
+@bp.post("/dateien/<root>/ordner")
+@login_required
+def mkdir(root):
+    sub = request.form.get("dir", "")
+    _, target = resolve(root, sub)
+    try:
+        (target / clean_name(request.form.get("name", ""))).mkdir()
+    except FileExistsError:
+        flash("Ein Element mit diesem Namen existiert bereits.", "error")
+    except (ValueError, OSError) as exc:
+        flash(str(exc), "error")
+    return back_to(root, sub)
+
+
+@bp.post("/dateien/<root>/umbenennen")
+@login_required
+def rename(root):
+    sub = request.form.get("dir", "")
+    base, src = resolve(root, request.form.get("path", ""))
+    if src == base or not src.exists():
+        abort(400)
+    try:
+        dest = src.with_name(clean_name(request.form.get("name", "")))
+        if dest.exists():
+            raise ValueError("Ein Element mit diesem Namen existiert bereits.")
+        src.rename(dest)
+    except (ValueError, OSError) as exc:
+        flash(str(exc), "error")
+    return back_to(root, sub)
+
+
+@bp.post("/dateien/<root>/loeschen")
+@login_required
+def delete(root):
+    sub = request.form.get("dir", "")
+    base, target = resolve(root, request.form.get("path", ""))
+    if target == base or not (target.exists() or target.is_symlink()):
+        abort(400)
+    try:
+        if target.is_dir() and not target.is_symlink():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        flash(f"„{target.name}“ gelöscht.", "ok")
+    except OSError as exc:
+        flash(f"Löschen fehlgeschlagen: {exc}", "error")
+    return back_to(root, sub)

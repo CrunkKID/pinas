@@ -1,0 +1,166 @@
+import functools
+import hmac
+import secrets
+import threading
+import time
+
+from flask import (Blueprint, abort, current_app, flash, g, redirect, render_template,
+                   request, session, url_for)
+
+from . import users
+from .db import get_db
+
+bp = Blueprint("auth", __name__)
+
+_MAX_FAILS = 5
+_FAIL_WINDOW = 300  # Sekunden
+_fails: dict[str, list[float]] = {}
+_fails_lock = threading.Lock()
+
+
+def _recent_fails(ip: str) -> list[float]:
+    now = time.monotonic()
+    with _fails_lock:
+        _fails[ip] = [t for t in _fails.get(ip, []) if now - t < _FAIL_WINDOW]
+        return _fails[ip]
+
+
+def _record_fail(ip: str) -> None:
+    with _fails_lock:
+        _fails.setdefault(ip, []).append(time.monotonic())
+
+
+def helper():
+    return current_app.extensions["pinas_helper"]
+
+
+def csrf_token() -> str:
+    if "csrf" not in session:
+        session["csrf"] = secrets.token_urlsafe(32)
+    return session["csrf"]
+
+
+@bp.app_context_processor
+def inject():
+    return {"csrf_token": csrf_token, "user": g.get("user")}
+
+
+_setup_lock = threading.Lock()
+
+
+def setup_done() -> bool:
+    if not current_app.config.get("SETUP_DONE"):
+        current_app.config["SETUP_DONE"] = get_db().execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
+    return current_app.config["SETUP_DONE"]
+
+
+@bp.before_app_request
+def load_user_and_check_csrf():
+    if request.endpoint not in ("auth.setup", "static") and not setup_done():
+        return redirect(url_for("auth.setup"))
+    g.user = None
+    uid = session.get("uid")
+    if uid is not None:
+        g.user = get_db().execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
+        if g.user is None:
+            session.clear()
+    if request.method == "POST":
+        sent = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token", "")
+        if not hmac.compare_digest(sent, session.get("csrf", "")):
+            abort(400, "Ungültiges oder abgelaufenes Formular – bitte Seite neu laden.")
+
+
+def login_required(view):
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        if g.user is None:
+            return redirect(url_for("auth.login", next=request.path))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def admin_required(view):
+    @functools.wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        if not g.user["is_admin"]:
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+
+
+@bp.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        ip = request.remote_addr or "?"
+        if len(_recent_fails(ip)) >= _MAX_FAILS:
+            flash("Zu viele Fehlversuche. Bitte in ein paar Minuten erneut versuchen.", "error")
+            return render_template("login.html"), 429
+        row = users.verify(get_db(), request.form.get("username", ""), request.form.get("password", ""))
+        if row is None:
+            _record_fail(ip)
+            flash("Benutzername oder Passwort falsch.", "error")
+            return render_template("login.html"), 401
+        session.clear()
+        session.permanent = True
+        session["uid"] = row["id"]
+        nxt = request.args.get("next", "")
+        # Nur relative Pfade zulassen (kein Open Redirect)
+        if not nxt.startswith("/") or nxt.startswith("//"):
+            nxt = url_for("index")
+        return redirect(nxt)
+    return render_template("login.html")
+
+
+@bp.route("/einrichtung", methods=["GET", "POST"])
+def setup():
+    """Ersteinrichtung nach dem ersten Start: legt den ersten Administrator an."""
+    if setup_done():
+        return redirect(url_for("index"))
+    if request.method == "POST":
+        f = request.form
+        if f.get("password") != f.get("confirm"):
+            flash("Die Passwörter stimmen nicht überein.", "error")
+        else:
+            with _setup_lock:
+                if setup_done():
+                    return redirect(url_for("auth.login"))
+                try:
+                    users.create_user(get_db(), helper(), current_app.config["USERS_DIR"],
+                                      f.get("username", ""), f.get("password", ""), True)
+                except users.UserError as exc:
+                    flash(str(exc), "error")
+                    return render_template("setup.html")
+                current_app.config["SETUP_DONE"] = True
+            row = users.get_user(get_db(), f.get("username", "").strip().lower())
+            session.clear()
+            session.permanent = True
+            session["uid"] = row["id"]
+            flash("Willkommen! Als Nächstes die Festplatte einrichten.", "ok")
+            return redirect(url_for("disk.index"))
+    return render_template("setup.html")
+
+
+@bp.post("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("auth.login"))
+
+
+@bp.route("/konto", methods=["GET", "POST"])
+@login_required
+def account():
+    if request.method == "POST":
+        conn = get_db()
+        if not users.verify(conn, g.user["username"], request.form.get("current", "")):
+            flash("Das aktuelle Passwort ist falsch.", "error")
+        elif request.form.get("new") != request.form.get("confirm"):
+            flash("Die neuen Passwörter stimmen nicht überein.", "error")
+        else:
+            try:
+                users.set_password(conn, helper(), g.user["username"], request.form.get("new", ""))
+                flash("Passwort geändert – gilt auch für das Netzlaufwerk.", "ok")
+                return redirect(url_for("auth.account"))
+            except users.UserError as exc:
+                flash(str(exc), "error")
+    return render_template("account.html")

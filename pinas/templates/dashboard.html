@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+{% if not s.disk.is_mount %}
+<div class="flash error">
+  Achtung: {{ s.disk.path }} ist kein eigenes Laufwerk – Daten landen gerade auf der SD-Karte.
+  {% if user.is_admin %}<a href="{{ url_for('disk.index') }}">Jetzt Festplatte einrichten</a>{% endif %}
+</div>
+{% endif %}
+
+<div class="grid">
+  <div class="card stat">
+    <small>Speicher ({{ s.disk.path }})</small>
+    <strong id="disk-used">{{ s.disk.used|filesize }}</strong>
+    <div class="bar"><span id="disk-bar" style="width: {{ (s.disk.used / s.disk.total * 100)|round(1) if s.disk.total else 0 }}%"></span></div>
+    <small id="disk-free">{{ s.disk.free|filesize }} frei von {{ s.disk.total|filesize }}</small>
+  </div>
+  <div class="card stat">
+    <small>CPU-Temperatur</small>
+    <strong id="temp">{{ '%.1f °C'|format(s.temp) if s.temp is not none else '–' }}</strong>
+    <small>Stromversorgung: <span id="throttled">{{ s.throttled or '–' }}</span></small>
+  </div>
+  <div class="card stat">
+    <small>Last (1/5/15 min, {{ s.cpus }} Kerne)</small>
+    <strong id="load">{{ s.load|join(' · ') if s.load else '–' }}</strong>
+    <small>Laufzeit: <span id="uptime">{{ s.uptime or '–' }}</span></small>
+  </div>
+  <div class="card stat">
+    <small>Arbeitsspeicher</small>
+    <strong id="mem">{{ (s.memory.used|filesize) if s.memory else '–' }}</strong>
+    <div class="bar"><span id="mem-bar" style="width: {{ (s.memory.used / s.memory.total * 100)|round(1) if s.memory else 0 }}%"></span></div>
+    <small>von {{ (s.memory.total|filesize) if s.memory else '–' }}</small>
+  </div>
+</div>
+
+<h2>Dienste</h2>
+<div class="card">
+  <ul class="services">
+    {% for name, state in services.items() %}
+      <li><span class="dot {{ 'ok' if state == 'active' else 'bad' }}"></span>{{ name }} <small class="muted">{{ state }}</small></li>
+    {% endfor %}
+  </ul>
+</div>
+
+<h2>Laufwerke</h2>
+{% for d in devices %}
+<div class="card">
+  <strong>/dev/{{ d.name }}</strong> <span class="muted">{{ d.model }} · {{ d.tran|upper }} · {{ d.size|filesize }}</span>
+  {% if d.parts %}
+  <table class="list compact">
+    <thead><tr><th>Partition</th><th>Dateisystem</th><th class="num">Größe</th><th>Eingehängt</th></tr></thead>
+    <tbody>
+    {% for p in d.parts %}
+      <tr><td>{{ p.name }}{% if p.label %} <small class="muted">({{ p.label }})</small>{% endif %}</td><td>{{ p.fstype }}</td><td class="num">{{ p.size|filesize }}</td><td>{{ p.mount or '–' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% else %}
+<p class="muted">Keine Laufwerksinformationen verfügbar.</p>
+{% endfor %}
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script>{% endblock %}
