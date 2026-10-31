@@ -1,0 +1,61 @@
+# Baut das PiNAS-SD-Karten-Image in der Cloud (GitHub Actions, kostenlos für öffentliche Repos).
+# - Manuell starten: Reiter "Actions" → "PiNAS-Image bauen" → "Run workflow"
+#   → Image als ZIP unter "Artifacts" der Ausführung
+# - Tag pushen (z. B. v1.0): Image + Imager-Katalog werden als GitHub-Release veröffentlicht
+name: PiNAS-Image bauen
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Speicherplatz freimachen
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: ARM-Emulation (qemu/binfmt) aktivieren
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Image bauen
+        run: bash image/build.sh
+
+      - name: Imager-Katalog erzeugen
+        id: meta
+        run: |
+          IMG="$(ls image/.pi-gen/deploy/*.img.xz | head -n1)"
+          NAME="$(basename "$IMG")"
+          cp "$IMG" "$NAME"
+          TAG="${GITHUB_REF_NAME}"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          bash image/make-os-list.sh "$NAME" "$BASE/$NAME" "$BASE/pinas-icon.png" os_list_pinas.json
+          cp image/pinas-icon.png pinas-icon.png
+          echo "img=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Als Artifact hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: pinas-image
+          path: |
+            ${{ steps.meta.outputs.img }}
+            os_list_pinas.json
+          compression-level: 0
+
+      - name: Release veröffentlichen
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.meta.outputs.img }}
+            os_list_pinas.json
+            pinas-icon.png
