@@ -66,6 +66,9 @@ mkdir -p "$APP"
 rm -rf "$APP/venv"  # Altlast früherer Versionen
 rsync -a --delete --exclude '__pycache__' "$SRC/pinas" "$APP/"
 chown -R root:root "$APP"
+# Lesbar für den Dienstbenutzer, egal mit welchen Rechten die Quelle kam
+# (Update-Pakete werden mit einer strengeren umask entpackt – sonst startet die Weboberfläche nicht)
+chmod -R u=rwX,go=rX "$APP"
 
 echo "==> Hilfsskript und sudo-Regel"
 install -m 0755 -o root -g root "$SRC/deploy/pinas-helper" /usr/local/sbin/pinas-helper
@@ -122,6 +125,7 @@ if [[ "$(cd "$SRC" && pwd -P)" != "/usr/local/share/pinas/src" ]]; then
   rsync -a --delete --exclude '__pycache__' "$SRC/pinas" "$SRC/deploy" /usr/local/share/pinas/src/
 fi
 chown -R root:root /usr/local/share/pinas/src
+chmod -R u=rwX,go=rX /usr/local/share/pinas/src
 install -d -m 0755 -o root -g root /var/lib/pinas-update
 install -d -m 0700 -o pinas -g pinas "$STATE/updates"
 

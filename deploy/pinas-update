@@ -22,6 +22,8 @@ import subprocess
 import sys
 import tarfile
 import time
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -173,12 +175,35 @@ def start(source: Path, label: str) -> None:
         raise UpdateError(res.stderr.strip() or "systemd-run fehlgeschlagen")
 
 
+def web_healthy(log, wait: int = 90) -> bool:
+    """Antwortet die Weboberfläche nach dem Neustart? (Jede HTTP-Antwort unter 500 zählt.)"""
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:8081/login", timeout=5) as resp:
+                if resp.status < 500:
+                    return True
+        except urllib.error.HTTPError as exc:
+            if exc.code < 500:
+                return True
+        except OSError:
+            pass
+        time.sleep(3)
+    log.write("\n==> Die Weboberfläche antwortet nicht.\n")
+    subprocess.run(["journalctl", "-u", "pinas", "-n", "30", "--no-pager"], stdout=log, stderr=subprocess.STDOUT)
+    return False
+
+
 def install_from(src: Path, log) -> bool:
     log.write(f"\n==> Installiere aus {src}\n")
     log.flush()
-    res = subprocess.run(["bash", str(src / "deploy" / "install.sh")], stdout=log, stderr=subprocess.STDOUT,
-                         cwd=str(src), timeout=3600)
-    return res.returncode == 0
+    try:
+        res = subprocess.run(["bash", str(src / "deploy" / "install.sh")], stdout=log, stderr=subprocess.STDOUT,
+                             cwd=str(src), timeout=3600)
+    except subprocess.TimeoutExpired:
+        return False
+    # Erfolgreich ist es erst, wenn die neue Weboberfläche auch wirklich startet
+    return res.returncode == 0 and web_healthy(log)
 
 
 def run(source_arg: str) -> int:
@@ -196,10 +221,7 @@ def run(source_arg: str) -> int:
         if INSTALLED.is_dir():
             shutil.copytree(INSTALLED, SWAP)
         old = installed_version()
-        try:
-            ok = install_from(WORK, log)
-        except subprocess.TimeoutExpired:
-            ok = False
+        ok = install_from(WORK, log)
         if ok:
             shutil.rmtree(PREVIOUS, ignore_errors=True)
             if SWAP.is_dir():
@@ -228,6 +250,9 @@ def main() -> int:
     if os.geteuid() != 0:
         print("Bitte als root ausführen.", file=sys.stderr)
         return 1
+    # sudo übernimmt die strenge umask des Webdienstes (0027) – entpackte Ordner wären dann für
+    # den Dienstbenutzer nicht lesbar und die Weboberfläche würde nach dem Update nicht starten
+    os.umask(0o022)
     UPD.mkdir(mode=0o755, exist_ok=True)
     cmd, args = (sys.argv[1] if len(sys.argv) > 1 else ""), sys.argv[2:]
     try:

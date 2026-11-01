@@ -2,6 +2,12 @@
 
 Neueste Version oben. Das Update-Center zeigt die Abschnitte an, die neuer sind als die installierte Version.
 
+## 1.2.2
+- Reparatur: Nach dem Update auf 1.2.1 startete die Weboberfläche nicht mehr („502 Bad Gateway“), weil die neuen Programmdateien falsche Zugriffsrechte bekamen – das ist behoben
+- Update-Center: Nach jeder Installation wird geprüft, ob die Weboberfläche wirklich startet; wenn nicht, wird automatisch die vorherige Version wiederhergestellt
+- Das Protokoll im Update-Center zeigt bei einem Fehler zusätzlich die Fehlermeldungen der Weboberfläche
+- Enthält alle Neuerungen aus 1.2.1 (Ein/Aus-Knöpfe, Werkseinstellungen, Betriebszeit)
+
 ## 1.2.1
 - Im Dashboard oben rechts gibt es jetzt die Knöpfe „Herunterfahren“, „Neu Start“, „Sicheres Herunterfahren“ und „Festplatte Ausschalten“
 - Herunterfahren: PiNAS fährt nach Bestätigung herunter
