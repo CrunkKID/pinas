@@ -8,6 +8,7 @@ from flask import (Blueprint, abort, current_app, flash, g, redirect, render_tem
                    request, session, url_for)
 
 from . import users
+from .config import storage
 from .db import get_db
 
 bp = Blueprint("auth", __name__)
@@ -126,7 +127,7 @@ def setup():
                 if setup_done():
                     return redirect(url_for("auth.login"))
                 try:
-                    users.create_user(get_db(), helper(), current_app.config["USERS_DIR"],
+                    users.create_user(get_db(), helper(), storage(current_app.config)["users"],
                                       f.get("username", ""), f.get("password", ""), True)
                 except users.UserError as exc:
                     flash(str(exc), "error")
