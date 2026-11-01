@@ -1,0 +1,14 @@
+/* Ereignis-Protokoll (Dashboard-Kachel „Ereignisse“ und Seite „Alle Ereignisse“) */
+.ev-wrap { overflow-x: auto; }
+.ev-table { min-width: 760px; font-size: .9rem; }
+.ev-table td { vertical-align: top; }
+.ev-time { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
+.ev-action { white-space: nowrap; }
+.ev-detail { word-break: break-word; max-width: 28rem; }
+.ev-device { line-height: 1.35; }
+.ev-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .5rem 1rem; }
+.ev-head h2 { margin-bottom: .5rem; }
+.ev-note { margin: .75rem 0 0; font-size: .85rem; }
+.ev-filter { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: end; margin-bottom: 1rem; }
+.ev-filter label { display: grid; gap: .25rem; font-size: .85rem; }
+.ev-pages { display: flex; justify-content: space-between; gap: 1rem; margin-top: 1rem; }

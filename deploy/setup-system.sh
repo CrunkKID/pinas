@@ -65,6 +65,8 @@ fi
 id pinas &>/dev/null || useradd --system --home-dir "$STATE" --shell /usr/sbin/nologin pinas
 # "video" erlaubt vcgencmd (Unterspannungs-Anzeige im Dashboard)
 usermod -aG video pinas
+# "systemd-journal" erlaubt das Lesen der Netzlaufwerk-Zugriffe fürs Ereignis-Protokoll (Samba full_audit)
+getent group systemd-journal >/dev/null && usermod -aG systemd-journal pinas
 
 echo "==> Verzeichnisse"
 mkdir -p "$STATE"

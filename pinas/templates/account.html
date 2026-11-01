@@ -51,6 +51,7 @@
   <p>Leg PiNAS als App auf den Startbildschirm deines Handys oder Tablets: eigenes Symbol, öffnet im Vollbild
     ohne Adressleiste – ganz ohne App Store.</p>
   <p class="app-installed" hidden><span class="dot ok"></span><b>Du nutzt PiNAS gerade als App.</b></p>
+  <p class="app-native" hidden><a class="button" href="pinasapp://verbindung">Anderes PiNAS verbinden</a></p>
   <div class="app-install" hidden>
     <button class="primary" id="app-install-btn">Als App installieren</button>
   </div>
@@ -104,9 +105,11 @@
   (() => {
     const card = document.getElementById("app-card");
     const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
-    if (standalone) {
+    const nativeApp = navigator.userAgent.includes("PiNAS-App/"); // Android-App (Ordner android/)
+    if (standalone || nativeApp) {
       card.querySelector(".app-installed").hidden = false;
       card.querySelector(".app-steps").hidden = true;
+      card.querySelector(".app-native").hidden = !nativeApp;
       return;
     }
     const ua = navigator.userAgent;

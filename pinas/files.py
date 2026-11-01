@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from flask import (Blueprint, abort, current_app, flash, g, jsonify, make_response, redirect,
                    render_template, request, send_file, url_for)
 
-from . import private, quota
+from . import events, private, quota
 from .auth import login_required
 from .config import TRASH_NAME, storage
 
@@ -141,6 +141,13 @@ def browse(root, sub=""):
         return redirect(url_for("files.browse", root="gemeinsam"))
     base, target = resolve(root, sub)
     if target.is_file():
+        # Vorschaubilder und weitere Teilstücke eines Videos nicht als eigenen Zugriff zählen
+        rng = request.headers.get("Range", "")
+        if not rng or rng.startswith("bytes=0-"):
+            if request.args.get("dl") == "1":
+                events.log("download", f"{ROOTS[root]}/{rel(base, target)}", events.size_of(target))
+            elif request.headers.get("Sec-Fetch-Dest", "document") == "document":
+                events.log("open", f"{ROOTS[root]}/{rel(base, target)}", events.size_of(target))
         return send_file(target, as_attachment=request.args.get("dl") == "1", conditional=True)
     if not target.is_dir():
         abort(404)
@@ -211,6 +218,7 @@ def upload(root):
             finally:
                 tmp.unlink(missing_ok=True)
             saved.append(dest.name)
+            events.log("upload", f"{ROOTS[root]}/{rel(base, dest)}", events.size_of(dest))
         except (ValueError, OSError) as exc:
             errors.append(f"{f.filename}: {exc}")
     return jsonify(saved=saved, errors=errors), (200 if not errors else 207)
@@ -222,7 +230,9 @@ def mkdir(root):
     sub = request.form.get("dir", "")
     base, target = resolve(root, sub)
     try:
-        (target / new_name(root, base, target, request.form.get("name", ""))).mkdir()
+        new_dir = target / new_name(root, base, target, request.form.get("name", ""))
+        new_dir.mkdir()
+        events.log("mkdir", f"{ROOTS[root]}/{rel(base, new_dir)}")
     except FileExistsError:
         flash("Ein Element mit diesem Namen existiert bereits.", "error")
     except (ValueError, OSError) as exc:
@@ -242,6 +252,7 @@ def rename(root):
         if dest.exists():
             raise ValueError("Ein Element mit diesem Namen existiert bereits.")
         src.rename(dest)
+        events.log("rename", f"{ROOTS[root]}/{rel(base, src)} → {dest.name}", events.size_of(dest))
     except (ValueError, OSError) as exc:
         flash(str(exc), "error")
     return back_to(root, sub)
@@ -256,7 +267,9 @@ def delete(root):
         abort(400)
     from .trash import move_to_trash  # hier importiert, sonst Kreis-Import (trash nutzt files)
     try:
+        size = events.size_of(target)
         move_to_trash(root, base, target)
+        events.log("delete", f"{ROOTS[root]}/{rel(base, target)}", size)
         flash(f"„{target.name}“ in den Papierkorb verschoben.", "ok")
     except OSError as exc:
         flash(f"Löschen fehlgeschlagen: {exc}", "error")

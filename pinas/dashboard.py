@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
+from . import events
 from .auth import admin_required, helper, login_required
 from .db import get_db
 from .helper import HelperError
@@ -406,7 +407,7 @@ def power(action):
 
 
 # Kacheln und Bereiche des Dashboards in der Standard-Reihenfolge
-TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "power", "services", "devices"]
+TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "power", "events", "services", "devices"]
 
 
 def layout() -> dict:
@@ -424,7 +425,7 @@ def layout() -> dict:
 
 
 # Systemweite Optionen, die nur Administratoren ändern (in settings unter dem Benutzernamen "")
-OPTION_DEFAULTS = {"show_system_disk": False}
+OPTION_DEFAULTS = {"show_system_disk": False, "log_events": False}
 
 
 def options() -> dict:
@@ -440,11 +441,58 @@ def options() -> dict:
 @admin_required
 def save_options():
     new = {k: request.form.get(k) == "1" for k in OPTION_DEFAULTS}
+    old = options()
+    if old["log_events"] and not new["log_events"]:
+        events.log("setting", "Ereignis-Protokoll ausgeschaltet")
     conn = get_db()
     conn.execute("INSERT OR REPLACE INTO settings (username, key, value) VALUES ('', 'options', ?)", (json.dumps(new),))
     conn.commit()
+    if new["log_events"] != old["log_events"]:
+        if new["log_events"]:
+            events.reset_samba_cursor(current_app.config)  # nur neue Netzlaufwerk-Zugriffe übernehmen
+            events.log("setting", "Ereignis-Protokoll eingeschaltet")
+        try:
+            helper().samba_audit(new["log_events"])
+        except HelperError as exc:
+            flash(f"Zugriffe übers Netzlaufwerk werden nicht protokolliert: {exc}", "error")
     flash("Optionen gespeichert.", "ok")
     return redirect(url_for("dashboard.index"))
+
+
+@bp.get("/dashboard/ereignisse")
+@admin_required
+def events_page():
+    """Alle Ereignisse mit Filter nach Benutzer und Art, 100 pro Seite."""
+    if not options()["log_events"]:
+        return redirect(url_for("dashboard.index"))
+    events.import_samba(current_app.config)
+    who, kind = request.args.get("wer", ""), request.args.get("art", "")
+    page = max(1, request.args.get("seite", 1, type=int))
+    rows = events.recent(current_app.config, 101, (page - 1) * 100, who, kind)
+    return render_template("events.html", rows=rows[:100], more=len(rows) > 100, page=page, who=who, kind=kind,
+                           names=events.usernames(current_app.config),
+                           max_rows=events.MAX_ROWS, max_days=events.MAX_DAYS)
+
+
+@bp.post("/dashboard/ereignisse/leeren")
+@admin_required
+def events_clear():
+    events.clear(current_app.config)
+    flash("Ereignis-Protokoll geleert.", "ok")
+    return redirect(url_for("dashboard.events_page"))
+
+
+@bp.get("/api/ereignisse")
+@admin_required
+def api_events():
+    """Neueste Ereignisse als fertige Tabellenzeilen (die Kachel aktualisiert sich alle 15 Sekunden)."""
+    if not options()["log_events"]:
+        return jsonify(html="")
+    events.import_samba(current_app.config)
+    return jsonify(html=render_template("_events_rows.html", rows=events.recent(current_app.config, EVENTS_IN_TILE)))
+
+
+EVENTS_IN_TILE = 15
 
 
 @bp.get("/dashboard")
@@ -461,8 +509,13 @@ def index():
         devices = [d for d in devices if not d["system"]]
     data_dir = str(current_app.config["DATA_DIR"])
     data_alias = next((d["alias"] for d in devices if any(p["mount"] == data_dir for p in d["parts"])), "")
+    event_rows = None
+    if g.user["is_admin"] and opts["log_events"]:
+        events.import_samba(current_app.config)
+        event_rows = events.recent(current_app.config, EVENTS_IN_TILE)
     return render_template("dashboard.html", s=stats(), devices=devices, services=services,
-                           data_alias=data_alias, layout=layout(), power=power_state(), options=opts)
+                           data_alias=data_alias, layout=layout(), power=power_state(), options=opts,
+                           event_rows=event_rows)
 
 
 @bp.post("/api/dashboard-layout")

@@ -49,6 +49,10 @@ class SystemHelper:
     def set_layout(self, layout: str) -> None:
         self._run("set-layout", layout, timeout=120)
 
+    def samba_audit(self, on: bool) -> None:
+        """Zugriffe übers Netzlaufwerk ins Ereignis-Protokoll schreiben (Samba-Modul full_audit)."""
+        self._run("samba-audit", "on" if on else "off", timeout=60)
+
     def disk_sleep(self) -> None:
         self._run("disk-sleep", timeout=60)
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Wie static/style.css (--accent) und pwa.py (THEME) -->
+    <color name="pinas_red">#C51A4A</color>
+    <color name="pinas_red_dark">#E0436F</color>
+    <color name="pinas_bg">#FFFFFF</color>
+    <color name="pinas_bg_dark">#161616</color>
+</resources>

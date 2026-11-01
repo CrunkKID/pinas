@@ -15,7 +15,8 @@ exfatprogs
 # Verschlüsselte Weboberfläche
 nginx
 openssl
-# Samba-Modul "recycle" für den Papierkorb beim Netzlaufwerk (je nach Debian-Version schon in samba enthalten)
+# Samba-Module "recycle" (Papierkorb) und "full_audit" (Ereignis-Protokoll) fürs Netzlaufwerk
+# (je nach Debian-Version schon in samba enthalten)
 ?samba-vfs-modules
 # Damit das NAS in der Windows-Netzwerkumgebung auftaucht
 ?wsdd

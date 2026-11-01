@@ -7,6 +7,7 @@
 </div></section>
 {% endblock %}
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='files.css') }}">
 <div class="files-head">
   <div class="tabs">
     {% for key, label in roots.items() %}
@@ -60,7 +61,7 @@
       <button type="button" role="menuitemcheckbox" data-toggle="thumbs">Vorschaubilder</button>
     </div>
   </details>
-  <div class="netspeed" title="Aktuelle Netzwerkgeschwindigkeit des NAS (auch Netzlaufwerk)">
+  <div class="netspeed" data-unit="mbit" title="Aktuelle Netzwerkgeschwindigkeit des NAS (auch Netzlaufwerk)">
     <span><span class="arrow">↑</span> Hochladen <b id="net-rx">–</b></span>
     <span><span class="arrow">↓</span> Herunterladen <b id="net-tx">–</b></span>
   </div>
@@ -79,7 +80,6 @@
 </svg>
 
 <div id="dropzone" class="dropzone" data-view="details" data-upload="{{ url_for('files.upload', root=root) }}" data-dir="{{ sub }}"{% if quota_free is not none %} data-quota-free="{{ quota_free }}"{% endif %}>
-  <div id="progress" class="progress" hidden><span></span><small></small></div>
   <div id="listing">
   {% if entries %}
   <div class="fv">

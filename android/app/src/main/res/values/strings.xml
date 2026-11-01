@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PiNAS</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="retry">Erneut versuchen</string>
+    <string name="change_connection">Anderes PiNAS verbinden</string>
+
+    <string name="setup_title">Mit deinem PiNAS verbinden</string>
+    <string name="setup_intro">Dein Handy muss im selben WLAN sein wie PiNAS. Gib die Adresse ein oder tippe unten auf ein gefundenes Gerät.</string>
+    <string name="setup_address">Adresse (z. B. pinas.local oder 192.168.178.20)</string>
+    <string name="setup_connect">Verbinden</string>
+    <string name="setup_invalid">Das sieht nicht nach einer Adresse aus.</string>
+    <string name="setup_found_title">Im WLAN gefunden</string>
+    <string name="setup_searching">Suche läuft …</string>
+    <string name="setup_found_hint">Antippen zum Verbinden</string>
+    <string name="setup_found_item">%1$s  ·  %2$s</string>
+    <string name="setup_help">Die Adresse steht auf dem Bildschirm am Pi und in der Weboberfläche unter „Konto“. Ein Zertifikat musst du in Android nicht installieren – das übernimmt die App.</string>
+    <string name="setup_cert_title">Ist das dein PiNAS?</string>
+    <string name="setup_cert_message">Adresse: %1$s\n%2$s\n\nFingerabdruck (SHA-1):\n%3$s\n\nVergleiche ihn mit der Seite „Sichere Verbindung“ in der Weboberfläche (Konto → Anleitung &amp; Zertifikat). Stimmt er überein, kann niemand sonst sich als dein PiNAS ausgeben.</string>
+    <string name="setup_cert_ok">Vertrauen</string>
+
+    <string name="offline_title">Gerade nicht erreichbar</string>
+    <string name="offline_text">Dein Handy kann das NAS im Moment nicht erreichen – zum Beispiel, weil du unterwegs bist, das WLAN aus ist oder PiNAS heruntergefahren wurde. Die App verbindet sich von selbst wieder.</string>
+    <string name="cert_title">Unbekanntes Zertifikat</string>
+    <string name="cert_text">Das Gerät unter dieser Adresse weist sich nicht als dein PiNAS aus. Wurde PiNAS neu aufgespielt, verbinde die App bitte neu.</string>
+
+    <string name="download_started">Wird geladen: %1$s</string>
+    <string name="download_done">Gespeichert in „Download“: %1$s</string>
+    <string name="download_failed">Download fehlgeschlagen: %1$s</string>
+
+    <string name="shortcut_files">Dateien</string>
+    <string name="shortcut_dashboard">Dashboard</string>
+</resources>

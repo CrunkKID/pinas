@@ -24,6 +24,8 @@ def main() -> None:
     start_purger(app)
     from .updates import start_reboot_watch
     start_reboot_watch(app)
+    from .events import start_importer
+    start_importer(app)
     host, port = app.config["HOST"], app.config["PORT"]
     # Upload-Zwischendateien auf die NAS-Platte statt auf die SD-Karte
     tmp = app.config["DATA_DIR"] / ".tmp"

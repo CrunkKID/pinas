@@ -9,6 +9,7 @@
 #   pinas-helper use-disk /dev/sdX1 keep [folder|root]    (vorhandene ext4-/NTFS-/exFAT-Partition einhängen)
 #   pinas-helper set-layout folder|root     (Ordner-Aufteilung umstellen, siehe unten)
 #   pinas-helper samba-config               (Samba-Freigaben neu schreiben)
+#   pinas-helper samba-audit on|off         (Netzlaufwerk-Zugriffe ins Ereignis-Protokoll, Modul full_audit)
 #   pinas-helper disk-sleep                 (NAS-Platte sofort in den Ruhezustand)
 #   pinas-helper update-stage DATEI         (Update-Paket prüfen und bereitlegen, siehe pinas-update)
 #   pinas-helper update-apply|update-rollback|update-discard
@@ -77,19 +78,34 @@ check_layout() { [[ "$1" == "folder" || "$1" == "root" ]] || die "Unbekannte Ord
 users_dir()  { [[ "$1" == "root" ]] && echo "$2/.pinas/users" || echo "$2/users"; }
 shared_dir() { [[ "$1" == "root" ]] && echo "$2" || echo "$2/shared"; }
 
+AUDIT_FLAG="/var/lib/pinas/samba-audit"  # vorhanden = Netzlaufwerk-Zugriffe protokollieren
+
+vfs_module() {
+  compgen -G "/usr/lib/*/samba/vfs/$1.so" >/dev/null || compgen -G "/usr/lib/samba/vfs/$1.so" >/dev/null
+}
+
 samba_config() {
   local veto="/.pinas-upload-*/"
   # Im Modus "root" PiNAS- und Systemordner in „Gemeinsam“ verbergen
   [[ "$PINAS_SHARED_MODE" == "root" ]] && veto="$veto.pinas/.tmp/lost+found/System Volume Information/\$RECYCLE.BIN/"
   # Papierkorb fürs Netzlaufwerk nur, wenn das Samba-Modul "recycle" vorhanden ist –
   # sonst ließen sich die Freigaben nicht mehr öffnen
-  local recycle='/^@R@/d'
-  if compgen -G "/usr/lib/*/samba/vfs/recycle.so" >/dev/null || compgen -G "/usr/lib/samba/vfs/recycle.so" >/dev/null; then
+  local recycle='/^@R@/d' audit='/^@A@/d' vfs=""
+  if vfs_module recycle; then
     recycle='s/^@R@//'
+    vfs="recycle"
   fi
+  # Ereignis-Protokoll fürs Netzlaufwerk (Admin-Option im Dashboard, siehe samba-audit).
+  # full_audit steht vor recycle, damit es das Löschen sieht, bevor recycle es in den Papierkorb umleitet
+  if [[ -e "$AUDIT_FLAG" ]] && vfs_module full_audit; then
+    audit='s/^@A@//'
+    vfs="full_audit${vfs:+ $vfs}"
+  fi
+  local vfsline='/^@V@/d'
+  [[ -n "$vfs" ]] && vfsline="s/^@V@//;s/@VFS@/$vfs/"
   sed -e "s|@USERS_DIR@|$(users_dir "$PINAS_SHARED_MODE" "$DATA")|g" \
       -e "s|@SHARED_DIR@|$(shared_dir "$PINAS_SHARED_MODE" "$DATA")|g" \
-      -e "s|@VETO@|$veto|g" -e "$recycle" "$SAMBA_TEMPLATE" > /etc/samba/pinas.conf
+      -e "s|@VETO@|$veto|g" -e "$recycle" -e "$audit" -e "$vfsline" "$SAMBA_TEMPLATE" > /etc/samba/pinas.conf
   testparm -s >/dev/null 2>&1 || die "Samba-Konfiguration fehlerhaft"
   systemctl try-reload-or-restart smbd 2>/dev/null || true
 }
@@ -400,6 +416,17 @@ case "$cmd" in
     exit 0
     ;;
   samba-config)
+    samba_config
+    exit 0
+    ;;
+  samba-audit)
+    [[ $# -eq 2 && ( "$2" == "on" || "$2" == "off" ) ]] || die "Aufruf: pinas-helper samba-audit on|off"
+    if [[ "$2" == "on" ]]; then
+      vfs_module full_audit || die "Das Samba-Modul full_audit ist nicht installiert."
+      install -m 0644 -o root -g root /dev/null "$AUDIT_FLAG"
+    else
+      rm -f "$AUDIT_FLAG"
+    fi
     samba_config
     exit 0
     ;;

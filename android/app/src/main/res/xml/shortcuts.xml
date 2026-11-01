@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lange auf das App-Symbol drücken – wie die "shortcuts" im Manifest der Web-App (pwa.py) -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="dateien"
+        android:shortcutShortLabel="@string/shortcut_files">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="pinasapp://open/dateien"
+            android:targetClass="de.pinas.app.MainActivity"
+            android:targetPackage="de.pinas.app" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="dashboard"
+        android:shortcutShortLabel="@string/shortcut_dashboard">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="pinasapp://open/dashboard"
+            android:targetClass="de.pinas.app.MainActivity"
+            android:targetPackage="de.pinas.app" />
+    </shortcut>
+</shortcuts>

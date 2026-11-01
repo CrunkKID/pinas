@@ -16,6 +16,7 @@ from pathlib import Path
 from flask import (Blueprint, abort, current_app, flash, make_response, redirect, render_template,
                    request, url_for)
 
+from . import events
 from .auth import admin_required, login_required
 from .config import TRASH_NAME, storage
 from .files import ROOTS, rel, root_dir, unique_path, user_roots
@@ -213,6 +214,7 @@ def restore(root):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest = unique_path(dest)
         shutil.move(str(src), str(dest))
+        events.log("restore", f"{ROOTS[root]}/{rel(files_base, dest)}", events.size_of(dest))
         where = rel(files_base, dest.parent) or ROOTS[root]
         flash(f"„{dest.name}“ wiederhergestellt (in {where}).", "ok")
     except OSError as exc:
@@ -229,10 +231,12 @@ def delete_forever(root):
     if target == base or not (target.exists() or target.is_symlink()):
         abort(400)
     try:
+        size = events.size_of(target)
         if target.is_dir() and not target.is_symlink():
             shutil.rmtree(target)
         else:
             target.unlink()
+        events.log("purge", f"{ROOTS[root]}/{TRASH_NAME}/{rel(base, target)}", size)
         flash(f"„{target.name}“ endgültig gelöscht.", "ok")
     except OSError as exc:
         flash(f"Löschen fehlgeschlagen: {exc}", "error")
@@ -246,6 +250,7 @@ def empty(root):
         abort(404)
     base = trash_base(root)
     errors = 0
+    events.log("empty", ROOTS[root], events.size_of(base))
     for p in list(base.iterdir()):
         try:
             if p.is_dir() and not p.is_symlink():

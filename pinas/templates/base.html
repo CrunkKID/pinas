@@ -43,7 +43,9 @@
       </div>
     </div>
   </header>
-  <nav class="subnav">
+  {# Reiter als Seitenleiste links (Handy: Leiste oben zum Wischen) #}
+  <div class="app-layout">
+  <nav class="subnav" aria-label="Hauptmenü">
     <div class="inner">
       <a href="{{ url_for('files.browse', root=home_root) }}" class="{{ 'active' if request.blueprint == 'files' }}">Dateien</a>
       <a href="{{ url_for('trash.browse', root=home_root) }}" class="{{ 'active' if request.blueprint == 'trash' }}">Papierkorb</a>
@@ -56,6 +58,7 @@
       <a href="{{ url_for('auth.account') }}" class="{{ 'active' if request.endpoint == 'auth.account' }}">Konto</a>
     </div>
   </nav>
+  <div class="app-main">
   {% endif %}
   {% block hero %}{% endblock %}
   <main class="{% block mainclass %}container{% endblock %}">
@@ -77,6 +80,10 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  {% if user %}
+  </div>
+  </div>
+  {% endif %}
   <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title">
     <form method="dialog">
       <h3 id="confirm-title">Bitte bestätigen</h3>

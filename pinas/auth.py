@@ -7,7 +7,7 @@ import time
 from flask import (Blueprint, abort, current_app, flash, g, redirect, render_template,
                    request, session, url_for)
 
-from . import users
+from . import events, users
 from .config import storage
 from .db import get_db
 from .helper import HelperError
@@ -96,17 +96,21 @@ def admin_required(view):
 def login():
     if request.method == "POST":
         ip = request.remote_addr or "?"
+        name = request.form.get("username", "").strip().lower()
         if len(_recent_fails(ip)) >= _MAX_FAILS:
+            events.log("login_block", username=name)
             flash("Zu viele Fehlversuche. Bitte in ein paar Minuten erneut versuchen.", "error")
             return render_template("login.html"), 429
         row = users.verify(get_db(), request.form.get("username", ""), request.form.get("password", ""))
         if row is None:
             _record_fail(ip)
+            events.log("login_fail", "mit Benutzername „%s“" % name[:40], username=name[:40])
             flash("Benutzername oder Passwort falsch.", "error")
             return render_template("login.html"), 401
         session.clear()
         session.permanent = True
         session["uid"] = row["id"]
+        events.log("login", username=row["username"])
         nxt = request.args.get("next", "")
         # Nur relative Pfade zulassen (kein Open Redirect)
         if not nxt.startswith("/") or nxt.startswith("//"):
@@ -146,6 +150,7 @@ def setup():
 
 @bp.post("/logout")
 def logout():
+    events.log("logout")
     session.clear()
     return redirect(url_for("auth.login"))
 

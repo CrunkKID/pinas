@@ -1,0 +1,16 @@
+{# Tabellenzeilen des Ereignis-Protokolls (Dashboard-Kachel, /api/ereignisse und Seite „Alle Ereignisse“) #}
+{% for e in rows %}
+<tr>
+  <td class="ev-time">{{ e.time }}</td>
+  <td><b>{{ e.username or '–' }}</b></td>
+  <td class="ev-action"><span class="dot {{ e.color }}"></span>{{ e.icon }} {{ e.text }}</td>
+  <td class="ev-detail">{{ e.detail or '' }}</td>
+  <td class="num">{{ e.size|filesize if e.size is not none else '' }}</td>
+  <td class="ev-device">
+    {% if e.host %}<b>{{ e.host }}</b><br>{% endif %}{{ e.device }}<br>
+    <small class="muted">{{ e.ip }}</small>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="muted">Noch keine Ereignisse. Sobald sich jemand anmeldet oder Dateien bearbeitet, erscheint es hier.</td></tr>
+{% endfor %}

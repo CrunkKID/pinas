@@ -58,4 +58,16 @@
     } catch {}
   }
   setInterval(refresh, 5000);
+
+  // Ereignis-Kachel (nur für Admins mit eingeschaltetem Protokoll vorhanden)
+  const evRows = document.getElementById("ev-rows");
+  if (evRows) {
+    setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const r = await fetch("/api/ereignisse", { credentials: "same-origin", cache: "no-store" });
+        if (r.ok) evRows.innerHTML = (await r.json()).html;
+      } catch {}
+    }, 15000);
+  }
 })();

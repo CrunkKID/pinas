@@ -49,6 +49,14 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
         <small class="muted">Das Laufwerk, auf dem PiNAS selbst läuft (meist die SD-Karte), erscheint unter „Laufwerke“.
           Normalerweise ist es verborgen. Andere Benutzer sehen es nie.</small></span>
     </label>
+    <label class="check option-row">
+      <input type="checkbox" name="log_events" value="1"{% if options.log_events %} checked{% endif %}>
+      <span><b>Ereignis-Protokoll</b><br>
+        <small class="muted">Hält fest, wer sich wann von welchem Gerät (Name und IP-Adresse) anmeldet und welche Dateien
+          hochgeladen, heruntergeladen, umbenannt oder gelöscht werden – samt Größe. Auch Zugriffe übers Netzlaufwerk.
+          Nur Administratoren sehen das Protokoll. Es behält höchstens die letzten 90 Tage bzw. 10.000 Einträge.
+          Bitte sag den anderen Benutzern Bescheid, dass protokolliert wird.</small></span>
+    </label>
     <div class="dialog-actions">
       <button type="button" id="dash-options-cancel">Abbrechen</button>
       <button class="primary">Speichern</button>
@@ -164,6 +172,24 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
 </div>
 
 <div class="dash-sections">
+{% if event_rows is not none %}
+<link rel="stylesheet" href="{{ url_for('static', filename='events.css') }}">
+<section {{ tile('events', 'Ereignisse') }}>
+<div class="ev-head">
+  <h2>Ereignisse</h2>
+  <a class="btn-sm" href="{{ url_for('dashboard.events_page') }}">Alle Ereignisse ansehen →</a>
+</div>
+<div class="card">
+  <div class="ev-wrap">
+    <table class="list compact ev-table">
+      <thead><tr><th>Zeit</th><th>Benutzer</th><th>Aktion</th><th>Datei / Details</th><th class="num">Größe</th><th>Gerät</th></tr></thead>
+      <tbody id="ev-rows">{% with rows = event_rows %}{% include "_events_rows.html" %}{% endwith %}</tbody>
+    </table>
+  </div>
+  <p class="muted ev-note">Nur für Administratoren sichtbar · aktualisiert sich alle 15 Sekunden · Netzlaufwerk-Zugriffe erscheinen mit bis zu 1 Minute Verzögerung.</p>
+</div>
+</section>
+{% endif %}
 <section {{ tile('services', 'Dienste') }}>
 <h2>Dienste</h2>
 <div class="card">

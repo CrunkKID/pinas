@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.PiNAS" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/pinas_red</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="android:colorBackground">@color/pinas_bg</item>
+        <item name="android:windowBackground">@color/pinas_bg</item>
+    </style>
+</resources>

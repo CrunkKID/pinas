@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Ereignisse{% endblock %}
+{% block hero %}
+<section class="hero"><div class="inner">
+  <h1>Ereignis-<b>Protokoll</b></h1>
+  <p>Wer hat sich wann angemeldet, von welchem Gerät, und was wurde mit welchen Dateien gemacht.</p>
+</div></section>
+{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='events.css') }}">
+<p><a href="{{ url_for('dashboard.index') }}">← Zurück zum Dashboard</a></p>
+
+<form class="ev-filter" method="get">
+  <label>Benutzer
+    <select name="wer">
+      <option value="">alle</option>
+      {% for n in names %}<option value="{{ n }}"{% if n == who %} selected{% endif %}>{{ n }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Art
+    <select name="art">
+      <option value="">alles</option>
+      <option value="login"{% if kind == 'login' %} selected{% endif %}>Anmeldungen und Verbindungen</option>
+      <option value="files"{% if kind == 'files' %} selected{% endif %}>Dateien</option>
+    </select>
+  </label>
+  <button class="btn-sm">Anzeigen</button>
+</form>
+
+<div class="card">
+  <div class="ev-wrap">
+    <table class="list compact ev-table">
+      <thead><tr><th>Zeit</th><th>Benutzer</th><th>Aktion</th><th>Datei / Details</th><th class="num">Größe</th><th>Gerät</th></tr></thead>
+      <tbody>{% include "_events_rows.html" %}</tbody>
+    </table>
+  </div>
+  <div class="ev-pages">
+    <span>{% if page > 1 %}<a href="{{ url_for('dashboard.events_page', wer=who, art=kind, seite=page - 1) }}">← Neuere</a>{% endif %}</span>
+    <span class="muted">Seite {{ page }}</span>
+    <span>{% if more %}<a href="{{ url_for('dashboard.events_page', wer=who, art=kind, seite=page + 1) }}">Ältere →</a>{% endif %}</span>
+  </div>
+</div>
+
+<p class="muted ev-note">Das Protokoll behält höchstens die letzten {{ max_days }} Tage bzw. {{ '{:,}'.format(max_rows).replace(',', '.') }} Einträge –
+  Älteres wird automatisch gelöscht. Der Gerätename stammt aus der Browser-Kennung und, wenn der Router ihn kennt,
+  aus dem Rechnernamen im Heimnetz. Beim Netzlaufwerk ist die Größe die der Datei, nicht die tatsächlich übertragene Menge.</p>
+
+<form method="post" action="{{ url_for('dashboard.events_clear') }}" class="inline" data-confirm="Alle Einträge des Ereignis-Protokolls werden gelöscht. Das lässt sich nicht rückgängig machen." data-confirm-title="Protokoll leeren?" data-confirm-ok="Leeren" data-confirm-danger>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button class="btn-sm">Protokoll leeren</button>
+</form>
+{% endblock %}

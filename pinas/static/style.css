@@ -48,12 +48,24 @@ html { -webkit-text-size-adjust: 100%; }
   .header-power .btn-sm { padding: .3rem .55rem; }
 }
 
-.subnav { background: var(--band); border-bottom: 1px solid var(--border); }
-.subnav .inner { display: flex; gap: .25rem; overflow-x: auto; }
-.subnav a { padding: .7rem .9rem; text-decoration: none; font-size: .95rem; font-weight: 500;
-  color: var(--muted); border-bottom: 3px solid transparent; white-space: nowrap; }
-.subnav a:hover { color: var(--text); }
-.subnav a.active { color: var(--text); border-bottom-color: var(--accent); }
+/* Reiter: Seitenleiste links, untereinander */
+.app-layout { display: flex; align-items: stretch; min-height: calc(100vh - 65px); }
+.app-main { flex: 1; min-width: 0; }
+.subnav { flex: none; width: 200px; background: var(--band); border-right: 1px solid var(--border); }
+.subnav .inner { position: sticky; top: 0; display: flex; flex-direction: column; gap: .15rem; padding: 1rem .6rem; }
+.subnav a { padding: .6rem .9rem; text-decoration: none; font-size: .95rem; font-weight: 500;
+  color: var(--muted); border-left: 3px solid transparent; border-radius: 0 var(--radius) var(--radius) 0; white-space: nowrap; }
+.subnav a:hover { color: var(--text); background: var(--hover); }
+.subnav a.active { color: var(--text); background: var(--surface); border-left-color: var(--accent); font-weight: 600; }
+/* Schmale Fenster: wieder eine Leiste oben zum Wischen */
+@media (max-width: 760px) {
+  .app-layout { display: block; min-height: 0; }
+  .subnav { width: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  .subnav .inner { position: static; flex-direction: row; gap: .25rem; overflow-x: auto; padding: 0 var(--gutter); }
+  .subnav a { border-left: 0; border-bottom: 3px solid transparent; border-radius: 0; }
+  .subnav a:hover { background: none; }
+  .subnav a.active { background: none; border-bottom-color: var(--accent); font-weight: 500; }
+}
 
 /* Seitentitel */
 .hero { background: var(--band); padding: 2.6rem 0 2.4rem; }
@@ -127,6 +139,9 @@ label.check input { width: auto; }
   color: var(--muted); font-variant-numeric: tabular-nums; }
 .netspeed b { color: var(--text); font-weight: 600; display: inline-block; min-width: 4.5em; }
 .netspeed .arrow { color: var(--accent); font-weight: 700; }
+.netspeed .busy b { color: var(--accent); }
+.netspeed .busy .arrow { animation: net-pulse 1s ease-in-out infinite; }
+@keyframes net-pulse { 50% { opacity: .3; } }
 .dropzone { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   min-height: 220px; position: relative; overflow-x: auto; }
 .dropzone.drag { outline: 3px dashed var(--accent); outline-offset: -8px; }

@@ -2,6 +2,16 @@
 
 Neueste Version oben. Das Update-Center zeigt die Abschnitte an, die neuer sind als die installierte Version.
 
+## 1.2.5
+- Die Reiter stehen jetzt als Seitenleiste links untereinander – auf dem Handy bleiben sie eine Leiste oben zum Wischen
+- Dateien: Beim Hoch- und Herunterladen erscheint ein Fortschrittsfenster wie bei Windows – mit Geschwindigkeit in Mbit/s, Restzeit, Verlaufskurve und „Abbrechen“
+- Dateien: Die Netzwerkgeschwindigkeit wird in Mbit/s angezeigt und leuchtet, solange etwas übertragen wird
+- Neues Ereignis-Protokoll (nur für Administratoren, unter „⚙ Optionen“ im Dashboard einschaltbar): Wer meldet sich wann mit welchem Gerät an, auch Fehlversuche – und was passiert mit den Dateien (hochladen, herunterladen, umbenennen, löschen, Papierkorb)
+- Ereignis-Protokoll: Auf Wunsch werden auch Zugriffe über das Netzlaufwerk erfasst; im Dashboard gibt es die Kachel „Ereignisse“ und die Seite „Alle Ereignisse“ mit Filter
+- Ereignis-Protokoll: Höchstens 10.000 Einträge und nichts älter als 90 Tage – Älteres wird automatisch gelöscht
+- Konto: In der neuen Android-App gibt es den Knopf „Anderes PiNAS verbinden“
+- Neu: PiNAS-App für Android (Ordner android/, wird auf GitHub unter „PiNAS-App bauen“ erstellt)
+
 ## 1.2.4
 - Nach einer Update-Installation zeigt eine ablaufende Uhr „Neu Start in“ die Sekunden bis zum Neustart – im Update-Center und im Dashboard
 - Das Laufwerk, auf dem PiNAS selbst läuft (SD-Karte), ist im Dashboard immer verborgen
