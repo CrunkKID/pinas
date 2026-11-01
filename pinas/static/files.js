@@ -19,6 +19,7 @@
         const old = document.getElementById(id);
         if (fresh && old) old.replaceWith(fresh);
       }
+      window.PiNASView?.refresh();  // gewählte Ansicht und Sortierung auf die neue Liste anwenden
     } catch {
       location.reload();
     }

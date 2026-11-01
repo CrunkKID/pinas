@@ -13,5 +13,7 @@
   <label>Passwort<input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
   <label>Wiederholen<input name="confirm" type="password" minlength="8" autocomplete="new-password" required></label>
   <button class="primary">Einrichten</button>
+  <p class="muted login-hint">Browser warnt vor einer unsicheren Verbindung?
+    <a href="{{ url_for('tls.index') }}">Sichere Verbindung einrichten</a></p>
 </form>
 {% endblock %}

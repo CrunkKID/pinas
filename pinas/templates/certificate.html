@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Sichere Verbindung{% endblock %}
+{% block hero %}
+<section class="hero"><div class="inner">
+  <h1><b>Sichere</b> Verbindung</h1>
+  <p>Einmal pro Gerät das PiNAS-Zertifikat installieren – danach keine Warnungen mehr.</p>
+</div></section>
+{% endblock %}
+{% block content %}
+
+{% if not secure %}
+<div class="flash error">Diese Seite ist gerade <b>nicht verschlüsselt</b> geöffnet.</div>
+{% endif %}
+
+<div class="card">
+  <h2>Warum warnt der Browser?</h2>
+  <p>Alles zwischen deinem Gerät und dem PiNAS ist verschlüsselt (https). Der Browser kennt aber den
+    „Ausweis“ des PiNAS noch nicht – das ist das Zertifikat. Installierst du es, weiß der Browser:
+    Das ist wirklich dein NAS. Dann verschwinden die Warnung und die blockierten Downloads.</p>
+  <p class="muted">Das Zertifikat wurde auf deinem Pi erzeugt und gilt nur für Adressen in deinem Heimnetz.
+    Für fremde Webseiten kann es nichts bestätigen.</p>
+  {% if ca %}
+  <p><a class="button primary" href="{{ url_for('tls.download') }}">Zertifikat herunterladen</a></p>
+  <p class="muted cert-fp">Fingerabdruck (SHA-1, so zeigt ihn Windows und der Pi-Bildschirm):<br>
+    <code>{{ ca.sha1 }}</code></p>
+  <p class="muted cert-fp">SHA-256: <code>{{ ca.sha256 }}</code></p>
+  {% else %}
+  <p class="muted">Das Zertifikat ist noch nicht erzeugt. Bitte den Pi einmal neu starten.</p>
+  {% endif %}
+</div>
+
+<h2>So installierst du es</h2>
+<div class="grid cert-steps">
+  <div class="card">
+    <h3>Windows (Edge, Chrome, Firefox)</h3>
+    <ol>
+      <li>Heruntergeladene Datei <b>PiNAS-Zertifikat.crt</b> doppelt anklicken → <b>Zertifikat installieren…</b></li>
+      <li><b>Aktueller Benutzer</b> → Weiter.</li>
+      <li><b>Alle Zertifikate in folgendem Speicher speichern</b> → Durchsuchen →
+        <b>Vertrauenswürdige Stammzertifizierungsstellen</b> → OK → Weiter → Fertig stellen.</li>
+      <li>Die Sicherheitswarnung mit <b>Ja</b> bestätigen. Vorher den Fingerabdruck mit dem oben vergleichen.</li>
+      <li>Browser komplett schließen und neu öffnen.</li>
+    </ol>
+  </div>
+  <div class="card">
+    <h3>Mac</h3>
+    <ol>
+      <li>Datei doppelt anklicken – die <b>Schlüsselbundverwaltung</b> öffnet sich. Schlüsselbund „Anmeldung“ wählen.</li>
+      <li>Das Zertifikat „PiNAS … Zertifizierungsstelle“ doppelt anklicken → <b>Vertrauen</b> aufklappen.</li>
+      <li><b>Bei Verwendung dieses Zertifikats:</b> „Immer vertrauen“ → Fenster schließen, mit Passwort bestätigen.</li>
+    </ol>
+  </div>
+  <div class="card">
+    <h3>iPhone / iPad</h3>
+    <ol>
+      <li>In <b>Safari</b> auf „Zertifikat herunterladen“ tippen → <b>Erlauben</b>.</li>
+      <li><b>Einstellungen</b> → oben „Profil geladen“ → <b>Installieren</b>.</li>
+      <li><b>Einstellungen → Allgemein → Info → Zertifikatsvertrauenseinstellungen</b> →
+        bei „PiNAS … Zertifizierungsstelle“ den Schalter einschalten.</li>
+    </ol>
+  </div>
+  <div class="card">
+    <h3>Android</h3>
+    <ol>
+      <li>Zertifikat herunterladen.</li>
+      <li><b>Einstellungen → Sicherheit</b> (ggf. „Weitere Sicherheitseinstellungen“) →
+        <b>Verschlüsselung &amp; Anmeldedaten → Zertifikat installieren → CA-Zertifikat</b>.</li>
+      <li>„Trotzdem installieren“ → die Datei <b>PiNAS-Zertifikat.crt</b> wählen.</li>
+    </ol>
+    <p class="muted">Die Menünamen unterscheiden sich je nach Hersteller etwas.</p>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Adresse</h2>
+  <p>Öffne PiNAS danach immer über <code>https://{{ request.host.split(':')[0] }}</code>.
+    Alte Lesezeichen mit <code>http://…:8080</code> leiten automatisch dorthin weiter.</p>
+</div>
+{% endblock %}

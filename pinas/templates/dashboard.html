@@ -7,6 +7,16 @@
 </div></section>
 {% endblock %}
 {% block content %}
+{# Kennung, Name, Position und An/Aus einer Kachel (Anpassen-Modus, siehe dashboard-edit.js) #}
+{% macro tile(id, title) -%}
+data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}"{% if id in layout.hidden %} data-off{% endif %}
+{%- endmacro %}
+
+<div class="dash-bar">
+  <p class="dash-hint muted" hidden>Kacheln mit dem Schalter ein- oder ausblenden, mit den Pfeilen oder per Ziehen verschieben.</p>
+  <button type="button" class="btn-sm" id="dash-reset" hidden>Zurücksetzen</button>
+  <button type="button" class="btn-sm" id="dash-edit">✎ Dashboard anpassen</button>
+</div>
 
 {% if not s.disk.is_mount %}
 <div class="flash error">
@@ -17,7 +27,7 @@
 
 <div class="grid">
   {% set pct = (s.disk.used / s.disk.total * 100) if s.disk.total else 0 %}
-  <div class="card stat disk-card">
+  <div class="card stat disk-card" {{ tile('disk', 'Festplatte') }}>
     <small>{{ data_alias or 'Festplatte' }} ({{ s.disk.path }})</small>
     <div class="disk-chart">
       <svg viewBox="0 0 120 120" class="donut" role="img" aria-labelledby="donut-title">
@@ -36,14 +46,14 @@
     </div>
     <small class="disk-warn" id="disk-warn"{% if pct < 90 %} hidden{% endif %}>⚠ Die Festplatte ist fast voll.</small>
   </div>
-  <div class="card stat">
+  <div class="card stat" {{ tile('uptime', 'Betriebszeit') }}>
     <small>Betriebszeit gesamt</small>
     <strong id="uptime-total">{{ s.history.total_text or (s.uptime.text if s.uptime else '–') }}</strong>
     <small>seit dem letzten Start: <span id="uptime">{{ s.uptime.text if s.uptime else '–' }}</span>
       (<span id="boot">{{ s.uptime.since if s.uptime else '–' }}</span>)</small>
     {% if s.history.since_text %}<small>gezählt seit {{ s.history.since_text }}</small>{% endif %}
   </div>
-  <div class="card stat">
+  <div class="card stat" {{ tile('io', 'Datenübertragung') }}>
     <small>Datenübertragung{% if s.io %} ({{ s.io.device }}){% endif %}</small>
     <div class="io">
       <div><span class="io-label">Gelesen</span><strong id="io-read">{{ s.io.read|filesize if s.io else '–' }}</strong></div>
@@ -51,7 +61,7 @@
     </div>
     <small>seit dem Einschalten</small>
   </div>
-  <div class="card stat">
+  <div class="card stat" {{ tile('net', 'Netzwerk') }}>
     <small>Netzwerk (live)</small>
     <div class="io">
       <div><span class="io-label">↑ Hochladen zum NAS</span><strong id="net-rx">–</strong></div>
@@ -59,19 +69,22 @@
     </div>
     <small>seit dem Einschalten: <span id="net-total">{{ (s.net.rx|filesize ~ ' empfangen, ' ~ s.net.tx|filesize ~ ' gesendet') if s.net else '–' }}</span></small>
   </div>
-  <div class="card stat">
+  <div class="card stat" {{ tile('temp', 'CPU-Temperatur') }}>
     <small>CPU-Temperatur</small>
     <strong id="temp">{{ ('%.1f °C'|format(s.temp))|replace('.', ',') if s.temp is not none else '–' }}</strong>
     <small>Höchstwert: <b id="temp-max">{{ ('%.1f °C'|format(s.history.temp_max))|replace('.', ',') if s.history.temp_max is not none else '–' }}</b>
       <span id="temp-max-at">{{ ('am ' ~ s.history.temp_max_at_text) if s.history.temp_max_at_text else '' }}</span></small>
     <small>Stromversorgung: <span id="throttled">{{ s.throttled or '–' }}</span></small>
   </div>
-  <div class="card stat">
-    <small>Last (1/5/15 min, {{ s.cpus }} Kerne)</small>
-    <strong id="load">{{ s.load|join(' · ') if s.load else '–' }}</strong>
-    <small>Durchschnittliche Auslastung</small>
+  <div class="card stat" {{ tile('cpu', 'Prozessor') }}>
+    <small>Prozessor-Auslastung</small>
+    <strong id="cpu-pct">{{ (s.cpu.pct ~ ' %') if s.cpu else '–' }}</strong>
+    <div class="bar"><span id="cpu-bar" class="{{ s.cpu.color if s.cpu }}" style="width: {{ s.cpu.pct if s.cpu else 0 }}%"></span></div>
+    <small><span class="dot {{ s.cpu.color if s.cpu else 'off' }}" id="cpu-dot"></span><b id="cpu-text">{{ s.cpu.text if s.cpu else '–' }}</b></small>
+    <small>Durchschnitt der letzten 15 Minuten: <span id="cpu-avg">{{ (s.cpu.avg15 ~ ' %') if s.cpu and s.cpu.avg15 is not none else '–' }}</span>
+      · {{ s.cpus }} Kerne</small>
   </div>
-  <div class="card stat">
+  <div class="card stat" {{ tile('mem', 'Arbeitsspeicher') }}>
     <small>Arbeitsspeicher</small>
     <strong id="mem">{{ (s.memory.used|filesize) if s.memory else '–' }}</strong>
     <div class="bar"><span id="mem-bar" style="width: {{ (s.memory.used / s.memory.total * 100)|round(1) if s.memory else 0 }}%"></span></div>
@@ -79,6 +92,8 @@
   </div>
 </div>
 
+<div class="dash-sections">
+<section {{ tile('services', 'Dienste') }}>
 <h2>Dienste</h2>
 <div class="card">
   <ul class="services">
@@ -95,7 +110,9 @@
   </ul>
   <p class="muted svc-note">Grün = läuft, Rot = gestört und sollte laufen, Grau = gestoppt oder nicht nötig.</p>
 </div>
+</section>
 
+<section {{ tile('devices', 'Laufwerke') }}>
 <h2>Laufwerke</h2>
 {% for d in devices %}
 <div class="card">
@@ -115,8 +132,11 @@
 {% else %}
 <p class="muted">Keine Laufwerksinformationen verfügbar.</p>
 {% endfor %}
+</section>
+</div>
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='netspeed.js') }}"></script>
 <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+<script src="{{ url_for('static', filename='dashboard-edit.js') }}"></script>
 {% endblock %}

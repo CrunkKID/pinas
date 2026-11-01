@@ -35,36 +35,88 @@
     <button type="button" id="mkdir-btn">Neuer Ordner</button>
   </form>
   <a class="button" href="{{ url_for('trash.browse', root=root) }}">🗑 Papierkorb</a>
+  <details class="menu">
+    <summary class="button">⇅ Sortieren</summary>
+    <div class="menu-pop" role="menu">
+      <button type="button" role="menuitemradio" data-set-sort="name">Name</button>
+      <button type="button" role="menuitemradio" data-set-sort="date">Änderungsdatum</button>
+      <button type="button" role="menuitemradio" data-set-sort="type">Typ</button>
+      <button type="button" role="menuitemradio" data-set-sort="size">Größe</button>
+      <hr>
+      <button type="button" role="menuitemradio" data-set-desc="0">Aufsteigend</button>
+      <button type="button" role="menuitemradio" data-set-desc="1">Absteigend</button>
+    </div>
+  </details>
+  <details class="menu">
+    <summary class="button">▦ Anzeigen</summary>
+    <div class="menu-pop" role="menu">
+      {% for key, label in [('xl', 'Extra große Symbole'), ('large', 'Große Symbole'), ('medium', 'Mittelgroße Symbole'),
+                            ('small', 'Kleine Symbole'), ('list', 'Liste'), ('details', 'Details'),
+                            ('tiles', 'Kacheln'), ('content', 'Inhalt')] %}
+      <button type="button" role="menuitemradio" data-set-view="{{ key }}">{{ label }}<kbd>Strg+Umschalt+{{ loop.index }}</kbd></button>
+      {% endfor %}
+      <hr>
+      <button type="button" role="menuitemcheckbox" data-toggle="ext">Dateinamenerweiterungen</button>
+      <button type="button" role="menuitemcheckbox" data-toggle="thumbs">Vorschaubilder</button>
+    </div>
+  </details>
   <div class="netspeed" title="Aktuelle Netzwerkgeschwindigkeit des NAS (auch Netzlaufwerk)">
     <span><span class="arrow">↑</span> Hochladen <b id="net-rx">–</b></span>
     <span><span class="arrow">↓</span> Herunterladen <b id="net-tx">–</b></span>
   </div>
 </div>
 
-<div id="dropzone" class="dropzone" data-upload="{{ url_for('files.upload', root=root) }}" data-dir="{{ sub }}">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="ic-dir" viewBox="0 0 48 48">
+    <path d="M4 11a3 3 0 0 1 3-3h11.5l4 4H41a3 3 0 0 1 3 3v3H4z" style="fill:#d9952b"/>
+    <path d="M4 17h40v20a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" style="fill:#f4bd4f"/>
+  </symbol>
+  <symbol id="ic-file" viewBox="0 0 48 48">
+    <path d="M11 4h18l10 10v28a2 2 0 0 1-2 2H11a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" style="fill:var(--surface);stroke:var(--muted);stroke-width:2"/>
+    <path d="M29 4v8a2 2 0 0 0 2 2h8" style="fill:none;stroke:var(--muted);stroke-width:2"/>
+    <rect x="9" y="27" width="30" height="10" style="fill:currentColor"/>
+  </symbol>
+</svg>
+
+<div id="dropzone" class="dropzone" data-view="details" data-upload="{{ url_for('files.upload', root=root) }}" data-dir="{{ sub }}">
   <div id="progress" class="progress" hidden><span></span><small></small></div>
   <div id="listing">
   {% if entries %}
-  <table class="list">
-    <thead><tr><th>Name</th><th class="num">Größe</th><th class="hide-sm">Geändert</th><th></th></tr></thead>
-    <tbody>
+  <div class="fv">
+    <div class="fv-head">
+      <button type="button" data-sort="name">Name</button>
+      <button type="button" data-sort="type">Typ</button>
+      <button type="button" data-sort="size" class="num">Größe</button>
+      <button type="button" data-sort="date">Änderungsdatum</button>
+      <span></span>
+    </div>
+    <div class="fv-list">
     {% for e in entries %}
-      <tr>
-        <td class="name">
-          <span class="icon {{ 'dir' if e.is_dir else 'file' }}"></span>
-          <a href="{{ url_for('files.browse', root=root, sub=e.path) }}"{% if not e.is_dir %} target="_blank"{% endif %}>{{ e.name }}</a>
-        </td>
-        <td class="num">{{ e.size|filesize if not e.is_dir else '' }}</td>
-        <td class="hide-sm muted">{{ e.mtime }}</td>
-        <td class="actions">
-          {% if not e.is_dir %}<a class="btn-sm" href="{{ url_for('files.browse', root=root, sub=e.path, dl=1) }}" title="Herunterladen">⬇</a>{% endif %}
+      <div class="fv-item" data-name="{{ e.name }}" data-kind="{{ e.kind }}" data-type="{{ e.type }}"
+           data-size="{{ e.size if e.size is not none else -1 }}" data-ts="{{ e.ts }}" data-dir="{{ 1 if e.is_dir else 0 }}">
+        <a class="fv-main" href="{{ url_for('files.browse', root=root, sub=e.path) }}" title="{{ e.name }}"{% if not e.is_dir %} target="_blank"{% endif %}>
+          <span class="fv-icon">
+            <svg><use href="#ic-{{ 'dir' if e.is_dir else 'file' }}"/></svg>
+            {% if e.ext %}<span class="fv-badge">{{ e.ext[:4]|upper }}</span>{% endif %}
+            {% if e.thumb %}<img class="fv-thumb" alt="" loading="lazy" decoding="async" data-src="{{ url_for('files.browse', root=root, sub=e.path) }}">{% endif %}
+          </span>
+          <span class="fv-text">
+            <span class="fv-name">{{ e.base }}{% if e.suffix %}<span class="fv-ext">{{ e.suffix }}</span>{% endif %}</span>
+            <span class="fv-meta"><span>{{ e.type }}</span>{% if not e.is_dir %}<span>{{ e.size|filesize }}</span>{% endif %}</span>
+          </span>
+        </a>
+        <span class="fv-type">{{ e.type }}</span>
+        <span class="fv-size">{{ e.size|filesize if not e.is_dir else '' }}</span>
+        <span class="fv-date">{{ e.mtime }}</span>
+        <span class="fv-actions">
+          {% if not e.is_dir %}<a class="btn-sm" data-download href="{{ url_for('files.browse', root=root, sub=e.path, dl=1) }}" title="Herunterladen">⬇</a>{% endif %}
           <button class="btn-sm" data-rename="{{ e.path }}" data-name="{{ e.name }}" title="Umbenennen">✎</button>
           <button class="btn-sm danger" data-delete="{{ e.path }}" data-name="{{ e.name }}" title="Löschen">🗑</button>
-        </td>
-      </tr>
+        </span>
+      </div>
     {% endfor %}
-    </tbody>
-  </table>
+    </div>
+  </div>
   {% else %}
   <p class="empty">Dieser Ordner ist leer. Dateien hierher ziehen oder „Hochladen“ wählen.</p>
   {% endif %}
@@ -81,5 +133,6 @@
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='netspeed.js') }}"></script>
+<script src="{{ url_for('static', filename='fileview.js') }}"></script>
 <script src="{{ url_for('static', filename='files.js') }}"></script>
 {% endblock %}

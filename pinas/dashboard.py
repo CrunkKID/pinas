@@ -3,12 +3,15 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, render_template
+from flask import Blueprint, current_app, g, jsonify, render_template, request
 
 from .auth import login_required
+from .db import get_db
 
 bp = Blueprint("dashboard", __name__)
 
@@ -31,6 +34,48 @@ def _cmd(*args: str) -> str | None:
 def cpu_temp() -> float | None:
     raw = _read("/sys/class/thermal/thermal_zone0/temp")
     return round(int(raw) / 1000, 1) if raw and raw.isdigit() else None
+
+
+_cpu_prev: tuple | None = None
+_cpu_lock = threading.Lock()
+
+
+def _cpu_times() -> tuple | None:
+    """(Zeitpunkt, CPU-Zeit gesamt, davon untätig) aus /proc/stat."""
+    raw = _read("/proc/stat")
+    if not raw:
+        return None
+    f = [int(x) for x in raw.splitlines()[0].split()[1:9]]
+    return time.monotonic(), sum(f), f[3] + f[4]  # idle + iowait (Warten auf die Platte ist keine Arbeit)
+
+
+# Klartext zur Auslastung: (bis Prozent, Text, Farbe)
+_CPU_LEVELS = [(25, "Wenig zu tun", "ok"), (60, "Normal beschäftigt", "ok"),
+               (90, "Viel zu tun", "warn"), (101, "Voll ausgelastet", "bad")]
+
+
+def cpu() -> dict | None:
+    """Prozessor-Auslastung in Prozent seit der letzten Abfrage (das Dashboard fragt alle 5 s)."""
+    global _cpu_prev
+    now = _cpu_times()
+    if not now:
+        return None
+    with _cpu_lock:
+        prev, _cpu_prev = _cpu_prev, now
+    if prev is None or now[0] - prev[0] > 30 or now[1] <= prev[1]:
+        # Erste oder veraltete Messung: kurz selbst messen
+        time.sleep(0.3)
+        prev, now = now, _cpu_times()
+        with _cpu_lock:
+            _cpu_prev = now
+    total, idle = now[1] - prev[1], now[2] - prev[2]
+    pct = round(max(0.0, min(100.0, 100 * (total - idle) / total))) if total > 0 else 0
+    text, color = next((t, c) for limit, t, c in _CPU_LEVELS if pct < limit)
+    load = os.getloadavg()[2] if hasattr(os, "getloadavg") else None
+    cores = os.cpu_count() or 1
+    return {"pct": pct, "text": text, "color": color, "cores": cores,
+            # Systemlast der letzten 15 Minuten, umgerechnet auf Prozent aller Kerne
+            "avg15": round(min(100.0, load / cores * 100)) if load is not None else None}
 
 
 def memory() -> dict | None:
@@ -217,6 +262,7 @@ def stats() -> dict:
         "temp": cpu_temp(),
         "load": [round(x, 2) for x in load] if load else None,
         "cpus": os.cpu_count(),
+        "cpu": cpu(),
         "memory": memory(),
         "uptime": uptime(),
         "history": history(),
@@ -228,6 +274,24 @@ def stats() -> dict:
     }
 
 
+# Kacheln und Bereiche des Dashboards in der Standard-Reihenfolge
+TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "services", "devices"]
+
+
+def layout() -> dict:
+    """Persönliche Anordnung des angemeldeten Benutzers: Reihenfolge und ausgeblendete Kacheln."""
+    row = get_db().execute("SELECT value FROM settings WHERE username = ? AND key = 'dashboard'",
+                           (g.user["username"],)).fetchone()
+    try:
+        saved = json.loads(row["value"]) if row else {}
+    except ValueError:
+        saved = {}
+    order = [t for t in saved.get("order", []) if t in TILES]
+    order = list(dict.fromkeys(order)) + [t for t in TILES if t not in order]  # neue Kacheln hinten anhängen
+    hidden = [t for t in saved.get("hidden", []) if t in TILES]
+    return {"order": order, "hidden": hidden, "pos": {t: i for i, t in enumerate(order)}}
+
+
 @bp.get("/dashboard")
 @login_required
 def index():
@@ -236,7 +300,23 @@ def index():
     data_dir = str(current_app.config["DATA_DIR"])
     data_alias = next((d["alias"] for d in devices if any(p["mount"] == data_dir for p in d["parts"])), "")
     return render_template("dashboard.html", s=stats(), devices=devices, services=services,
-                           data_alias=data_alias)
+                           data_alias=data_alias, layout=layout())
+
+
+@bp.post("/api/dashboard-layout")
+@login_required
+def save_layout():
+    data = request.get_json(silent=True) or {}
+    order = [t for t in data.get("order", []) if t in TILES]
+    hidden = [t for t in data.get("hidden", []) if t in TILES]
+    conn = get_db()
+    if data.get("reset"):
+        conn.execute("DELETE FROM settings WHERE username = ? AND key = 'dashboard'", (g.user["username"],))
+    else:
+        conn.execute("INSERT OR REPLACE INTO settings (username, key, value) VALUES (?, 'dashboard', ?)",
+                     (g.user["username"], json.dumps({"order": order, "hidden": hidden})))
+    conn.commit()
+    return jsonify(ok=True)
 
 
 @bp.get("/api/stats")

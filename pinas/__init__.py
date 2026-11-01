@@ -34,6 +34,11 @@ def create_app() -> Flask:
         PERMANENT_SESSION_LIFETIME=timedelta(days=7),
         MAX_CONTENT_LENGTH=None,
     )
+    if app.config["PROXY"]:
+        # Echte Client-IP (für die Login-Sperre) und https von nginx übernehmen
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+        app.config["SESSION_COOKIE_SECURE"] = True
     paths = storage(app.config)
     for d in (paths["users"], paths["shared"]):
         try:
@@ -45,8 +50,9 @@ def create_app() -> Flask:
     app.extensions["pinas_helper"] = SystemHelper(app.config["HELPER"])
     app.extensions["pinas_history"] = History(app.config["DB_PATH"].parent / "history.json")
 
-    from . import admin, auth, dashboard, disk, files, trash
+    from . import admin, auth, dashboard, disk, files, tls, trash
     app.register_blueprint(auth.bp)
+    app.register_blueprint(tls.bp)
     app.register_blueprint(files.bp)
     app.register_blueprint(trash.bp)
     app.register_blueprint(dashboard.bp)

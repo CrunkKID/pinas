@@ -57,7 +57,8 @@ def setup_done() -> bool:
 
 @bp.before_app_request
 def load_user_and_check_csrf():
-    if request.endpoint not in ("auth.setup", "static") and not setup_done():
+    # Zertifikat-Seite schon vor der Einrichtung erreichbar, damit die Warnung gleich verschwindet
+    if request.endpoint not in ("auth.setup", "static") and request.blueprint != "tls" and not setup_done():
         return redirect(url_for("auth.setup"))
     g.user = None
     uid = session.get("uid")

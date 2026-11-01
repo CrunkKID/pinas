@@ -11,6 +11,13 @@ CREATE TABLE IF NOT EXISTS users (
     is_admin   INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- Persönliche Einstellungen (z. B. Dashboard-Kacheln), gelten auf allen Geräten des Benutzers
+CREATE TABLE IF NOT EXISTS settings (
+    username   TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    PRIMARY KEY (username, key)
+);
 """
 
 

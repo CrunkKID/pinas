@@ -15,6 +15,12 @@
   <p class="muted">Anmeldung mit Benutzername <b>{{ user.username }}</b> und deinem Passwort.</p>
 </div>
 
+<div class="card">
+  <h2>Sichere Verbindung</h2>
+  <p>Warnt dein Browser oder blockiert er Downloads? Installiere einmal pro Gerät das PiNAS-Zertifikat.</p>
+  <a class="button" href="{{ url_for('tls.index') }}">Anleitung &amp; Zertifikat</a>
+</div>
+
 <h2>Passwort ändern</h2>
 <form method="post" class="card form-grid">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

@@ -23,6 +23,9 @@ def load_config() -> dict:
         "HELPER": os.environ.get("PINAS_HELPER", "/usr/local/sbin/pinas-helper"),
         "HOST": os.environ.get("PINAS_HOST", "0.0.0.0"),
         "PORT": int(os.environ.get("PINAS_PORT", "8080")),
+        # Hinter nginx mit https (auf dem Pi immer, im Entwicklungsmodus nicht)
+        "PROXY": os.environ.get("PINAS_PROXY") == "1",
+        "CA_CERT": Path(os.environ.get("PINAS_CA_CERT", "/etc/pinas/tls/ca.crt")),
     }
 
 

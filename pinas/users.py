@@ -101,4 +101,5 @@ def delete_user(conn, helper: SystemHelper, username: str) -> None:
     except HelperError as exc:
         raise UserError(f"Systembenutzer konnte nicht entfernt werden: {exc}") from exc
     conn.execute("DELETE FROM users WHERE username = ?", (username,))
+    conn.execute("DELETE FROM settings WHERE username = ?", (username,))
     conn.commit()

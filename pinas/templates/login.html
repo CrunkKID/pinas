@@ -9,5 +9,7 @@
   <label>Benutzername<input name="username" autocomplete="username" autocapitalize="none" required autofocus></label>
   <label>Passwort<input name="password" type="password" autocomplete="current-password" required></label>
   <button class="primary">Anmelden</button>
+  <p class="muted login-hint">Browser warnt vor einer unsicheren Verbindung?
+    <a href="{{ url_for('tls.index') }}">Sichere Verbindung einrichten</a></p>
 </form>
 {% endblock %}

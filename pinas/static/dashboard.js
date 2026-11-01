@@ -13,7 +13,15 @@
       if (!r.ok) return;
       const s = await r.json();
       if (s.temp != null) set("temp", `${s.temp.toFixed(1).replace(".", ",")} °C`);
-      if (s.load) set("load", s.load.join(" · "));
+      if (s.cpu) {
+        set("cpu-pct", `${s.cpu.pct} %`);
+        set("cpu-text", s.cpu.text);
+        if (s.cpu.avg15 != null) set("cpu-avg", `${s.cpu.avg15} %`);
+        const bar = document.getElementById("cpu-bar");
+        bar.style.width = s.cpu.pct + "%";
+        bar.className = s.cpu.color;
+        document.getElementById("cpu-dot").className = `dot ${s.cpu.color}`;
+      }
       if (s.uptime) { set("uptime", s.uptime.text); set("boot", s.uptime.since); }
       if (s.history) {
         if (s.history.total_text) set("uptime-total", s.history.total_text);

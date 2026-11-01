@@ -16,6 +16,34 @@ bp = Blueprint("files", __name__)
 ROOTS = {"privat": "Privat", "gemeinsam": "Gemeinsam"}
 _FORBIDDEN_CHARS = set('/\\\0')
 
+# Dateiart für Symbolfarbe, Vorschaubild und die Spalte „Typ“ (wie im Windows-Explorer)
+_KINDS = {
+    "image": ("Bild", {"jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif", "heic", "heif", "tif", "tiff", "raw", "dng"}),
+    "video": ("Video", {"mp4", "mkv", "mov", "avi", "wmv", "webm", "m4v", "mpg", "mpeg", "ts"}),
+    "audio": ("Audio", {"mp3", "wav", "flac", "aac", "m4a", "ogg", "wma", "opus"}),
+    "pdf": ("PDF-Dokument", {"pdf"}),
+    "doc": ("Dokument", {"doc", "docx", "odt", "rtf", "txt", "md", "pages"}),
+    "sheet": ("Tabelle", {"xls", "xlsx", "ods", "csv", "numbers"}),
+    "slides": ("Präsentation", {"ppt", "pptx", "odp", "key"}),
+    "archive": ("Archiv", {"zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso", "img"}),
+    "code": ("Code", {"py", "js", "html", "css", "json", "xml", "sh", "bat", "ps1", "c", "cpp", "java", "yml", "yaml", "ini", "conf"}),
+}
+_EXT_KIND = {ext: kind for kind, (_, exts) in _KINDS.items() for ext in exts}
+# Formate, die der Browser selbst als Vorschaubild anzeigen kann
+_THUMB_EXTS = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif"}
+
+
+def file_kind(name: str, is_dir: bool) -> dict:
+    if is_dir:
+        return {"kind": "dir", "ext": "", "type": "Dateiordner", "base": name, "suffix": "", "thumb": False}
+    stem, dot, ext = name.rpartition(".")
+    if not (dot and stem) or len(ext) > 8:
+        return {"kind": "file", "ext": "", "type": "Datei", "base": name, "suffix": "", "thumb": False}
+    low = ext.lower()
+    kind = _EXT_KIND.get(low, "file")
+    label = f"{_KINDS[kind][0]} ({low.upper()})" if kind != "file" else f"{low.upper()}-Datei"
+    return {"kind": kind, "ext": low, "type": label, "base": stem, "suffix": "." + ext, "thumb": low in _THUMB_EXTS}
+
 
 def hidden_names(root: str) -> frozenset:
     """Ordner, die in der obersten Ebene verborgen sind: der Papierkorb und im Modus "root"
@@ -110,7 +138,9 @@ def browse(root, sub=""):
                 "path": rel(base, Path(e.path)),
                 "is_dir": is_dir,
                 "size": None if is_dir else st.st_size,
+                "ts": int(st.st_mtime),
                 "mtime": datetime.fromtimestamp(st.st_mtime).strftime("%d.%m.%Y %H:%M"),
+                **file_kind(e.name, is_dir),
             })
     entries.sort(key=lambda x: (not x["is_dir"], x["name"].casefold()))
 
