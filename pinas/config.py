@@ -2,14 +2,21 @@
 import os
 from pathlib import Path
 
+SETTINGS_FILE = Path("/etc/default/pinas")
+
+# Papierkorb-Ordner ganz oben in „Privat“ und „Gemeinsam“ (gleicher Name wie bei Samba "recycle")
+TRASH_NAME = ".papierkorb"
+
+# Ordner, die im Modus "root" in „Gemeinsam“ ausgeblendet und geschützt werden
+# (PiNAS-eigene Ordner und Systemordner von Linux/Windows)
+ROOT_MODE_HIDDEN = frozenset({".pinas", ".tmp", "lost+found", "System Volume Information", "$RECYCLE.BIN"})
+
 
 def load_config() -> dict:
     data_dir = Path(os.environ.get("PINAS_DATA", "/srv/nas"))
     state_dir = Path(os.environ.get("PINAS_STATE", "/var/lib/pinas"))
     return {
         "DATA_DIR": data_dir,
-        "USERS_DIR": data_dir / "users",
-        "SHARED_DIR": data_dir / "shared",
         "DB_PATH": state_dir / "pinas.db",
         "SECRET_FILE": state_dir / "secret.key",
         # Leerer Wert = Entwicklungsmodus ohne Samba/Systembenutzer
@@ -17,3 +24,24 @@ def load_config() -> dict:
         "HOST": os.environ.get("PINAS_HOST", "0.0.0.0"),
         "PORT": int(os.environ.get("PINAS_PORT", "8080")),
     }
+
+
+def shared_mode() -> str:
+    """"folder": eigene Ordner users/ und shared/ (Standard).
+    "root": „Gemeinsam“ zeigt die ganze Platte (z. B. vom Windows-PC übernommene Dateien).
+
+    Wird bei jedem Aufruf frisch gelesen, damit eine Umstellung ohne Neustart wirkt."""
+    try:
+        for line in SETTINGS_FILE.read_text().splitlines():
+            if line.startswith("PINAS_SHARED_MODE="):
+                return "root" if line.split("=", 1)[1].strip() == "root" else "folder"
+    except OSError:
+        pass
+    return "root" if os.environ.get("PINAS_SHARED_MODE") == "root" else "folder"
+
+
+def storage(cfg) -> dict:
+    data = cfg["DATA_DIR"]
+    if shared_mode() == "root":
+        return {"mode": "root", "users": data / ".pinas" / "users", "shared": data, "hidden": ROOT_MODE_HIDDEN}
+    return {"mode": "folder", "users": data / "users", "shared": data / "shared", "hidden": frozenset()}
