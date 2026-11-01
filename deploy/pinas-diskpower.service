@@ -1,0 +1,6 @@
+[Unit]
+Description=PiNAS Energiesparen fuer die Festplatte
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pinas-diskpower
