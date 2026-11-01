@@ -24,6 +24,7 @@
   <nav class="subnav">
     <div class="inner">
       <a href="{{ url_for('files.browse', root='privat') }}" class="{{ 'active' if request.blueprint == 'files' }}">Dateien</a>
+      <a href="{{ url_for('trash.browse', root='privat') }}" class="{{ 'active' if request.blueprint == 'trash' }}">Papierkorb</a>
       <a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.blueprint == 'dashboard' }}">Dashboard</a>
       {% if user.is_admin %}
       <a href="{{ url_for('admin.index') }}" class="{{ 'active' if request.blueprint == 'admin' }}">Benutzer</a>
@@ -40,7 +41,18 @@
     {% endfor %}
     {% block content %}{% endblock %}
   </main>
+  <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title">
+    <form method="dialog">
+      <h3 id="confirm-title">Bitte bestätigen</h3>
+      <p id="confirm-text"></p>
+      <div class="dialog-actions">
+        <button value="cancel" id="confirm-cancel">Abbrechen</button>
+        <button value="ok" id="confirm-ok" class="primary">OK</button>
+      </div>
+    </form>
+  </dialog>
   <script>window.CSRF = "{{ csrf_token() }}";</script>
+  <script src="{{ url_for('static', filename='confirm.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
