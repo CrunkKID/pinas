@@ -2,6 +2,7 @@ from flask import Blueprint, current_app, flash, g, redirect, render_template, r
 
 from . import users
 from .auth import admin_required, helper
+from .config import storage
 from .db import get_db
 
 bp = Blueprint("admin", __name__, url_prefix="/benutzer")
@@ -21,7 +22,7 @@ def create():
         flash("Die Passwörter stimmen nicht überein.", "error")
     else:
         try:
-            name = users.create_user(get_db(), helper(), current_app.config["USERS_DIR"],
+            name = users.create_user(get_db(), helper(), storage(current_app.config)["users"],
                                      f.get("username", ""), f.get("password", ""), f.get("is_admin") == "1")
             flash(f"Benutzer „{name}“ angelegt.", "ok")
         except users.UserError as exc:
