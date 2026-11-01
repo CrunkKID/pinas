@@ -36,6 +36,13 @@ class SystemHelper:
     def delete_user(self, username: str) -> None:
         self._run("delete-user", username)
 
-    def use_disk(self, device: str, mode: str) -> None:
-        """mode "format": Laufwerk löschen und neu formatieren, "keep": ext4-Partition übernehmen."""
-        self._run("use-disk", device, mode, timeout=1800)
+    def use_disk(self, device: str, mode: str, layout: str = "folder") -> None:
+        """mode "format": Laufwerk löschen und neu formatieren, "keep": ext4-/NTFS-/exFAT-Partition übernehmen.
+        layout "folder": eigene Ordner für „Gemeinsam“, "root": „Gemeinsam“ zeigt die ganze Platte."""
+        self._run("use-disk", device, mode, layout, timeout=1800)
+
+    def set_layout(self, layout: str) -> None:
+        self._run("set-layout", layout, timeout=120)
+
+    def disk_sleep(self) -> None:
+        self._run("disk-sleep", timeout=60)
