@@ -1,0 +1,5 @@
+__pycache__/
+devdata/
+image/.pi-gen/
+*.img
+*.img.xz
