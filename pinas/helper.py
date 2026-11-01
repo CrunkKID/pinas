@@ -37,6 +37,10 @@ class SystemHelper:
     def delete_user(self, username: str) -> None:
         self._run("delete-user", username)
 
+    def set_private(self, username: str, on: bool) -> None:
+        """Freigabe „Privat“ im Netzlaufwerk für diesen Benutzer ein- oder ausschalten."""
+        self._run("private-access", username, "on" if on else "off")
+
     def use_disk(self, device: str, mode: str, layout: str = "folder") -> None:
         """mode "format": Laufwerk löschen und neu formatieren, "keep": ext4-/NTFS-/exFAT-Partition übernehmen.
         layout "folder": eigene Ordner für „Gemeinsam“, "root": „Gemeinsam“ zeigt die ganze Platte."""

@@ -8,15 +8,10 @@ from flask import Blueprint, current_app, flash, redirect, render_template, requ
 
 from .auth import admin_required, helper
 from .config import shared_mode
-from .dashboard import _cmd, block_devices, disk_names, save_disk_names
+from .dashboard import _cmd, block_devices, disk_names, save_disk_names, system_disk
 from .helper import HelperError
 
 bp = Blueprint("disk", __name__, url_prefix="/laufwerk")
-
-
-def system_disk() -> str | None:
-    source = _cmd("findmnt", "-no", "SOURCE", "/")
-    return _cmd("lsblk", "-no", "PKNAME", source) if source else None
 
 
 FS_NAMES = {"ext4": "ext4 (Linux)", "fuseblk": "NTFS (Windows)", "ntfs3": "NTFS (Windows)", "exfat": "exFAT"}

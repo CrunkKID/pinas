@@ -7,6 +7,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
@@ -266,6 +267,12 @@ def disk_key(disk: dict) -> str:
     return f"serial:{serial}" if serial else f"model:{model}:{disk.get('size')}"
 
 
+def system_disk() -> str | None:
+    """Laufwerk, auf dem Raspberry Pi OS und PiNAS selbst laufen (meist die SD-Karte "mmcblk0")."""
+    source = _cmd("findmnt", "-no", "SOURCE", "/")
+    return _cmd("lsblk", "-no", "PKNAME", source) if source else None
+
+
 def block_devices() -> list[dict]:
     out = _cmd("lsblk", "-J", "-b", "-o", "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,TRAN,LABEL,SERIAL")
     if not out:
@@ -363,6 +370,12 @@ def power_state() -> dict:
     return state
 
 
+@bp.app_context_processor
+def inject_power():
+    # Für die Ein/Aus-Knöpfe in der Kopfzeile und den Herunterfahr-Hinweis auf jeder Seite
+    return {"power": power_state()} if g.get("user") else {}
+
+
 # Knöpfe oben rechts: URL-Teil → (Helper-Aktion, Meldung danach)
 POWER_ACTIONS = {
     "herunterfahren": ("shutdown", "PiNAS fährt jetzt herunter. Nach etwa 30 Sekunden kannst du den Strom trennen."),
@@ -385,6 +398,10 @@ def power(action):
         flash(message, "ok")
     except HelperError as exc:
         flash(str(exc), "error")
+    # Zurück auf die Seite, von der aus geklickt wurde (die Knöpfe stehen in der Kopfzeile jeder Seite)
+    ref = urlparse(request.referrer or "")
+    if ref.netloc == request.host and ref.path.startswith("/"):
+        return redirect(ref.path + (f"?{ref.query}" if ref.query else ""))
     return redirect(url_for("dashboard.index"))
 
 
@@ -406,15 +423,46 @@ def layout() -> dict:
     return {"order": order, "hidden": hidden, "pos": {t: i for i, t in enumerate(order)}}
 
 
+# Systemweite Optionen, die nur Administratoren ändern (in settings unter dem Benutzernamen "")
+OPTION_DEFAULTS = {"show_system_disk": False}
+
+
+def options() -> dict:
+    row = get_db().execute("SELECT value FROM settings WHERE username = '' AND key = 'options'").fetchone()
+    try:
+        saved = json.loads(row["value"]) if row else {}
+    except ValueError:
+        saved = {}
+    return {k: bool(saved.get(k, v)) for k, v in OPTION_DEFAULTS.items()}
+
+
+@bp.post("/dashboard/optionen")
+@admin_required
+def save_options():
+    new = {k: request.form.get(k) == "1" for k in OPTION_DEFAULTS}
+    conn = get_db()
+    conn.execute("INSERT OR REPLACE INTO settings (username, key, value) VALUES ('', 'options', ?)", (json.dumps(new),))
+    conn.commit()
+    flash("Optionen gespeichert.", "ok")
+    return redirect(url_for("dashboard.index"))
+
+
 @bp.get("/dashboard")
 @login_required
 def index():
     services = [{**svc, **service_info(svc["unit"])} for svc in SERVICES]
+    opts = options()
+    sysdisk = system_disk()
     devices = block_devices()
+    for d in devices:
+        d["system"] = d["name"] == sysdisk
+    # Das Laufwerk, auf dem PiNAS selbst läuft, ist verborgen – nur ein Admin kann es per Option einblenden
+    if not (g.user["is_admin"] and opts["show_system_disk"]):
+        devices = [d for d in devices if not d["system"]]
     data_dir = str(current_app.config["DATA_DIR"])
     data_alias = next((d["alias"] for d in devices if any(p["mount"] == data_dir for p in d["parts"])), "")
     return render_template("dashboard.html", s=stats(), devices=devices, services=services,
-                           data_alias=data_alias, layout=layout(), power=power_state())
+                           data_alias=data_alias, layout=layout(), power=power_state(), options=opts)
 
 
 @bp.post("/api/dashboard-layout")

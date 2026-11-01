@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_clock.html" import countdown_clock %}
 {% block title %}Update-Center{% endblock %}
 {% block hero %}
 <section class="hero"><div class="inner">
@@ -49,9 +50,13 @@
     diese Seite lädt sich von selbst neu. <b>Bitte den Pi jetzt nicht ausschalten.</b></p>
 </div>
 {% elif st.state == 'done' and reboot_at %}
-<div class="card upd-running" id="upd-reboot" data-at="{{ reboot_at }}">
-  <h2>✓ Update erfolgreich – <span id="upd-reboot-text">Neustart in <b id="upd-reboot-s">15</b> Sekunden</span></h2>
-  <p>{{ st.message }} Nach dem Neustart (ca. 1 Minute) lädt diese Seite von selbst neu.</p>
+<div class="card reboot-box" id="upd-reboot" data-at="{{ reboot_at }}">
+  {{ countdown_clock(reboot_at) }}
+  <div>
+    <h2>✓ Update erfolgreich installiert</h2>
+    <p>{{ st.message }}</p>
+    <p class="muted">Nach dem Neustart (ca. 1 Minute) lädt diese Seite von selbst neu.</p>
+  </div>
 </div>
 {% elif st.state == 'done' %}
 <div class="flash ok">✓ {{ st.message }}</div>
@@ -225,15 +230,9 @@
   // Nach dem Update: Countdown bis zum Neustart, dann warten, bis PiNAS wieder da ist
   const reboot = document.getElementById("upd-reboot");
   if (reboot) {
+    // Die Uhr selbst läuft über countdown.js; hier nur auf das Ende des Neustarts warten
     const at = +reboot.dataset.at;
     const tick = async () => {
-      const left = Math.round(at - Date.now() / 1000);
-      if (left > 0) {
-        document.getElementById("upd-reboot-s").textContent = left;
-        setTimeout(tick, 1000);
-        return;
-      }
-      document.getElementById("upd-reboot-text").textContent = "PiNAS startet neu …";
       // Erst nach dem Neustart wieder fragen (vorher antwortet noch der alte Dienst)
       if (Date.now() / 1000 > at + 25) {
         try {

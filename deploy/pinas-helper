@@ -4,6 +4,7 @@
 #   pinas-helper add-user NAME           (Passwort über stdin)
 #   pinas-helper set-password NAME       (Passwort über stdin)
 #   pinas-helper delete-user NAME
+#   pinas-helper private-access NAME on|off  (Freigabe „Privat“ für diesen Benutzer ein/aus)
 #   pinas-helper use-disk /dev/sdX format [folder|root]   (Platte löschen, ext4 anlegen, einhängen)
 #   pinas-helper use-disk /dev/sdX1 keep [folder|root]    (vorhandene ext4-/NTFS-/exFAT-Partition einhängen)
 #   pinas-helper set-layout folder|root     (Ordner-Aufteilung umstellen, siehe unten)
@@ -20,6 +21,7 @@
 set -euo pipefail
 
 GROUP="nasusers"
+PRIVATE_GROUP="pinasprivat"  # nur Mitglieder sehen die Freigabe „Privat“
 MARK="pinas-managed"
 SETTINGS="/etc/default/pinas"
 SAMBA_TEMPLATE="/usr/local/share/pinas/smb-pinas.conf.in"
@@ -373,6 +375,19 @@ case "$cmd" in
     [[ $# -eq 2 ]] || die "Aufruf: pinas-helper $cmd NAME"
     name="$2"
     check_user_name
+    ;;
+  private-access)
+    [[ $# -eq 3 && ( "$3" == "on" || "$3" == "off" ) ]] || die "Aufruf: pinas-helper private-access NAME on|off"
+    name="$2"
+    check_user_name
+    id "$name" &>/dev/null || die "Unbekannter Benutzer"
+    getent group "$PRIVATE_GROUP" >/dev/null || groupadd --system "$PRIVATE_GROUP"
+    if [[ "$3" == "on" ]]; then
+      usermod -aG "$PRIVATE_GROUP" "$name"
+    else
+      gpasswd -d "$name" "$PRIVATE_GROUP" &>/dev/null || true
+    fi
+    exit 0
     ;;
   use-disk)
     [[ $# -eq 3 || $# -eq 4 ]] || die "Aufruf: pinas-helper use-disk GERÄT format|keep [folder|root]"

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Nicht erreichbar{% endblock %}
+{% block mainclass %}login-wrap{% endblock %}
+{% block content %}
+<div class="card login offline-card">
+  <div class="brand big"><span class="logo"></span>PiNAS</div>
+  <h1>Gerade <b>nicht erreichbar</b></h1>
+  <p class="muted">Dein Handy kann das NAS im Moment nicht erreichen. Das passiert zum Beispiel, wenn du
+    unterwegs bist und nicht im Heimnetz, das WLAN aus ist oder PiNAS heruntergefahren wurde.</p>
+  <button class="primary" onclick="location.href = '/'">Erneut versuchen</button>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  // Sobald das Netz zurück ist, automatisch neu laden
+  addEventListener("online", () => { location.href = "/"; });
+  setInterval(() => fetch("/manifest.webmanifest", { cache: "no-store" }).then((r) => { if (r.ok) location.href = "/"; }).catch(() => {}), 10000);
+</script>
+{% endblock %}

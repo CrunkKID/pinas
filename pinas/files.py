@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from flask import (Blueprint, abort, current_app, flash, g, jsonify, make_response, redirect,
                    render_template, request, send_file, url_for)
 
-from . import quota
+from . import private, quota
 from .auth import login_required
 from .config import TRASH_NAME, storage
 
@@ -47,6 +47,20 @@ def file_kind(name: str, is_dir: bool) -> dict:
     return {"kind": kind, "ext": low, "type": label, "base": stem, "suffix": "." + ext, "thumb": low in _THUMB_EXTS}
 
 
+def user_roots() -> dict:
+    """Bereiche des angemeldeten Benutzers: „Gemeinsam“ immer, „Privat“ nur wenn eingerichtet."""
+    if private.enabled(g.user["username"]):
+        return ROOTS
+    return {k: v for k, v in ROOTS.items() if k != "privat"}
+
+
+@bp.app_context_processor
+def inject_home():
+    # Ziel der Menüpunkte „Dateien“ und „Papierkorb“
+    user = g.get("user")
+    return {"home_root": "privat" if user and private.enabled(user["username"]) else "gemeinsam"}
+
+
 def hidden_names(root: str) -> frozenset:
     """Ordner, die in der obersten Ebene verborgen sind: der Papierkorb und im Modus "root"
     zusätzlich PiNAS- und Systemordner in „Gemeinsam“."""
@@ -60,6 +74,8 @@ def root_dir(root: str) -> Path:
         abort(503, "Die Festplatte ist ausgeschaltet. Im Dashboard oben rechts mit „Festplatte einschalten“ wieder aktivieren.")
     paths = storage(current_app.config)
     if root == "privat":
+        if not private.enabled(g.user["username"]):
+            abort(404, "Du hast noch kein privates Laufwerk. Unter „Konto“ kannst du es einrichten.")
         base = paths["users"] / g.user["username"]
     elif root == "gemeinsam":
         base = paths["shared"]
@@ -121,6 +137,8 @@ def back_to(root: str, sub: str):
 @bp.get("/dateien/<root>/<path:sub>")
 @login_required
 def browse(root, sub=""):
+    if root == "privat" and not private.enabled(g.user["username"]):
+        return redirect(url_for("files.browse", root="gemeinsam"))
     base, target = resolve(root, sub)
     if target.is_file():
         return send_file(target, as_attachment=request.args.get("dl") == "1", conditional=True)
@@ -160,7 +178,7 @@ def browse(root, sub=""):
         # Mit Speicherlimit zeigt „Privat“ den persönlichen Platz statt der ganzen Platte
         usage = SimpleNamespace(total=space["limit"], used=space["used"],
                                 free=min(space["free"], usage.free))
-    resp = make_response(render_template("files.html", root=root, roots=ROOTS, sub=rel(base, target),
+    resp = make_response(render_template("files.html", root=root, roots=user_roots(), sub=rel(base, target),
                                          entries=entries, crumbs=crumbs, usage=usage,
                                          quota_free=usage.free if space and space["limit"] else None))
     # Ordnerinhalt nie aus dem Browser-Cache anzeigen (sonst fehlen frisch hochgeladene Dateien)

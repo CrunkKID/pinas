@@ -18,7 +18,7 @@ from flask import (Blueprint, abort, current_app, flash, make_response, redirect
 
 from .auth import admin_required, login_required
 from .config import TRASH_NAME, storage
-from .files import ROOTS, rel, root_dir, unique_path
+from .files import ROOTS, rel, root_dir, unique_path, user_roots
 
 bp = Blueprint("trash", __name__, url_prefix="/papierkorb")
 
@@ -162,6 +162,8 @@ def _tree_size(path: Path) -> int:
 def browse(root, sub=""):
     if root not in ROOTS:
         abort(404)
+    if root not in user_roots():
+        return redirect(url_for("trash.browse", root="gemeinsam"))
     base, target = resolve_in_trash(root, sub)
     if not target.is_dir():
         abort(404)
@@ -191,7 +193,7 @@ def browse(root, sub=""):
         acc.append(part)
         crumbs.append((part, "/".join(acc)))
     resp = make_response(render_template(
-        "trash.html", root=root, roots=ROOTS, sub=rel(base, target), entries=entries, crumbs=crumbs,
+        "trash.html", root=root, roots=user_roots(), sub=rel(base, target), entries=entries, crumbs=crumbs,
         total=total, days=days, choices=RETENTION_CHOICES))
     resp.headers["Cache-Control"] = "no-store"
     return resp

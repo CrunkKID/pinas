@@ -50,8 +50,9 @@ def create_app() -> Flask:
     app.extensions["pinas_helper"] = SystemHelper(app.config["HELPER"])
     app.extensions["pinas_history"] = History(app.config["DB_PATH"].parent / "history.json")
 
-    from . import admin, auth, dashboard, disk, files, tls, trash, updates
+    from . import admin, auth, dashboard, disk, files, pwa, tls, trash, updates
     app.register_blueprint(auth.bp)
+    app.register_blueprint(pwa.bp)
     app.register_blueprint(tls.bp)
     app.register_blueprint(updates.bp)
     app.register_blueprint(files.bp)
@@ -62,6 +63,7 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index():
+        # Ohne eingerichtetes „Privat“ leitet files.browse weiter nach „Gemeinsam“
         return redirect(url_for("files.browse", root="privat"))
 
     @app.template_filter("filesize")

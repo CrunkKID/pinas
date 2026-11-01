@@ -10,6 +10,7 @@ from flask import (Blueprint, abort, current_app, flash, g, redirect, render_tem
 from . import users
 from .config import storage
 from .db import get_db
+from .helper import HelperError
 
 bp = Blueprint("auth", __name__)
 
@@ -58,7 +59,7 @@ def setup_done() -> bool:
 @bp.before_app_request
 def load_user_and_check_csrf():
     # Zertifikat-Seite schon vor der Einrichtung erreichbar, damit die Warnung gleich verschwindet
-    if request.endpoint not in ("auth.setup", "static") and request.blueprint != "tls" and not setup_done():
+    if request.endpoint not in ("auth.setup", "static") and request.blueprint not in ("tls", "pwa") and not setup_done():
         return redirect(url_for("auth.setup"))
     g.user = None
     uid = session.get("uid")
@@ -165,5 +166,26 @@ def account():
                 return redirect(url_for("auth.account"))
             except users.UserError as exc:
                 flash(str(exc), "error")
+    from . import private
     from .quota import info
-    return render_template("account.html", space=info(g.user["username"]))
+    return render_template("account.html", space=info(g.user["username"]),
+                           has_private=private.enabled(g.user["username"]))
+
+
+@bp.post("/konto/privat")
+@login_required
+def private_drive():
+    """Jeder Benutzer richtet sein privates Laufwerk selbst ein – oder schaltet es wieder aus."""
+    from . import private
+    on = request.form.get("on") == "1"
+    try:
+        private.set_enabled(g.user["username"], on, helper())
+    except HelperError as exc:
+        flash(f"Das hat nicht geklappt: {exc}", "error")
+        return redirect(url_for("auth.account"))
+    if on:
+        flash("Dein privates Laufwerk „Privat“ ist eingerichtet – nur du siehst die Dateien darin.", "ok")
+        return redirect(url_for("files.browse", root="privat"))
+    flash("„Privat“ ist ausgeschaltet. Deine Dateien darin bleiben erhalten und sind wieder da, "
+          "sobald du es erneut einrichtest.", "ok")
+    return redirect(url_for("auth.account"))

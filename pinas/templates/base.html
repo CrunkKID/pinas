@@ -1,10 +1,19 @@
 <!doctype html>
+{% from "_power.html" import power_btn with context %}
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}PiNAS{% endblock %} · PiNAS</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- Als App installierbar (pwa.py) -->
+  <link rel="manifest" href="{{ url_for('pwa.manifest') }}">
+  <meta name="theme-color" content="#c51a4a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PiNAS">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='app/apple-touch-icon.png') }}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect x='3' y='4' width='18' height='7' rx='2' fill='%23c51a4a'/><rect x='3' y='13' width='18' height='7' rx='2' fill='%23c51a4a'/></svg>">
 </head>
 <body>
@@ -14,6 +23,19 @@
       <a class="brand" href="{{ url_for('index') }}"><span class="logo"></span>PiNAS</a>
       <div class="usermenu">
         <a href="{{ url_for('auth.account') }}"><span class="uname">Angemeldet als </span><b>{{ user.username }}</b></a>
+        {% if user.is_admin and power and not power.pending %}
+        <div class="header-power" role="group" aria-label="PiNAS ausschalten oder neu starten">
+          {{ power_btn('herunterfahren', 'Herunterfahren', 'PiNAS herunterfahren?',
+                       'PiNAS fährt sofort herunter. Netzlaufwerk und Weboberfläche sind danach nicht mehr erreichbar. Zum Einschalten den Strom kurz trennen und wieder einstecken.',
+                       'Herunterfahren', True, '⏻') }}
+          {{ power_btn('neustart', 'Neustart', 'PiNAS neu starten?',
+                       'PiNAS startet neu und ist etwa 1–2 Minuten nicht erreichbar. Laufende Kopiervorgänge werden abgebrochen.',
+                       'Neu starten', False, '↻') }}
+          {{ power_btn('sicher-herunterfahren', 'Sicheres Herunterfahren', 'Sicher herunterfahren?',
+                       'Zuerst wird die Festplatte sauber abgemeldet und ausgeschaltet, 2 Minuten später fährt PiNAS herunter. So ist die Platte garantiert zur Ruhe gekommen.',
+                       'Sicher herunterfahren', True, '🛡') }}
+        </div>
+        {% endif %}
         <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="link">Abmelden</button>
@@ -23,8 +45,8 @@
   </header>
   <nav class="subnav">
     <div class="inner">
-      <a href="{{ url_for('files.browse', root='privat') }}" class="{{ 'active' if request.blueprint == 'files' }}">Dateien</a>
-      <a href="{{ url_for('trash.browse', root='privat') }}" class="{{ 'active' if request.blueprint == 'trash' }}">Papierkorb</a>
+      <a href="{{ url_for('files.browse', root=home_root) }}" class="{{ 'active' if request.blueprint == 'files' }}">Dateien</a>
+      <a href="{{ url_for('trash.browse', root=home_root) }}" class="{{ 'active' if request.blueprint == 'trash' }}">Papierkorb</a>
       <a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.blueprint == 'dashboard' }}">Dashboard</a>
       {% if user.is_admin %}
       <a href="{{ url_for('admin.index') }}" class="{{ 'active' if request.blueprint == 'admin' }}">Benutzer</a>
@@ -40,6 +62,19 @@
     {% for cat, msg in get_flashed_messages(with_categories=true) %}
       <div class="flash {{ cat }}">{{ msg }}</div>
     {% endfor %}
+    {# Geplantes Herunterfahren/Neustarten: Hinweis auf jeder Seite (der Neustart nach einem Update hat seine eigene Uhr) #}
+    {% if user and power and power.pending and power.pending.action != 'update-reboot' %}
+    <div class="flash error power-pending">
+      <span><b>{{ {'shutdown': 'PiNAS fährt herunter', 'reboot': 'PiNAS startet neu', 'safe-shutdown': 'Sicheres Herunterfahren: Festplatte ist aus, PiNAS fährt herunter'}.get(power.pending.action, 'PiNAS fährt herunter') }}</b>
+        um {{ power.pending.at_text }} – noch <b class="power-countdown" data-at="{{ power.pending.at }}">…</b></span>
+      {% if user.is_admin %}
+      <form method="post" action="{{ url_for('dashboard.power', action='abbrechen') }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn-sm">Abbrechen</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
   <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title">
@@ -54,6 +89,19 @@
   </dialog>
   <script>window.CSRF = "{{ csrf_token() }}";</script>
   <script src="{{ url_for('static', filename='confirm.js') }}"></script>
+  <script src="{{ url_for('static', filename='countdown.js') }}"></script>
+  <script>
+    // App-Funktion: geht nur über https mit vertrautem Zertifikat – sonst einfach weiter als Webseite
+    if ("serviceWorker" in navigator && window.isSecureContext) {
+      navigator.serviceWorker.register("{{ url_for('pwa.service_worker') }}", { scope: "/" }).catch(() => {});
+    }
+    // Installations-Angebot des Browsers für den Knopf „Als App installieren“ (Konto) aufheben
+    addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      window.pinasInstall = e;
+      document.dispatchEvent(new Event("pinas-installable"));
+    });
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

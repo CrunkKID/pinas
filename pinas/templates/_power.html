@@ -1,0 +1,8 @@
+{# Knopf für Herunterfahren/Neustart/Festplatte – mit Bestätigungsfenster (confirm.js) #}
+{% macro power_btn(action, label, title, confirm, ok, danger=False, short=None) -%}
+<form method="post" action="{{ url_for('dashboard.power', action=action) }}" class="inline"
+      data-confirm="{{ confirm }}" data-confirm-title="{{ title }}" data-confirm-ok="{{ ok }}"{% if danger %} data-confirm-danger{% endif %}>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button class="btn-sm" title="{{ title|replace('?', '') }}">{% if short %}<span class="pw-icon">{{ short }}</span><span class="pw-label">{{ label }}</span>{% else %}{{ label }}{% endif %}</button>
+</form>
+{%- endmacro %}

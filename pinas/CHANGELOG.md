@@ -2,6 +2,18 @@
 
 Neueste Version oben. Das Update-Center zeigt die Abschnitte an, die neuer sind als die installierte Version.
 
+## 1.2.4
+- Nach einer Update-Installation zeigt eine ablaufende Uhr „Neu Start in“ die Sekunden bis zum Neustart – im Update-Center und im Dashboard
+- Das Laufwerk, auf dem PiNAS selbst läuft (SD-Karte), ist im Dashboard immer verborgen
+- Neues Fenster „⚙ Optionen“ im Dashboard (nur für Administratoren): Dort lässt sich das Systemlaufwerk mit einem Häkchen einblenden
+- Von Anfang an gibt es nur ein Laufwerk: „Gemeinsam“
+- Das private Laufwerk „Privat“ richtet jeder Benutzer selbst unter „Konto“ ein und kann es dort wieder ausschalten – die Dateien bleiben dabei erhalten
+- Benutzer, die schon Dateien in „Privat“ haben, behalten ihr privates Laufwerk automatisch
+- „Herunterfahren“, „Neustart“ und „Sicheres Herunterfahren“ stehen jetzt oben rechts neben „Abmelden“ auf jeder Seite (nur für Administratoren); im Dashboard bleibt „Festplatte ausschalten“
+- Ein geplantes Herunterfahren wird auf jeder Seite mit Restzeit angezeigt
+- PiNAS als App: Auf Handy, Tablet und PC als App installierbar – mit eigenem Symbol, im Vollbild und mit Anleitung unter „Konto“
+- Ist das NAS nicht erreichbar, zeigt die App „Gerade nicht erreichbar“ und verbindet sich wieder von selbst
+
 ## 1.2.3
 - Update-Center: Vor jeder Installation wird geprüft, ob genug Speicherplatz frei ist, ob neue Programmpakete nötig sind und ob dafür Internet da ist – erst dann lässt sich installieren
 - Update-Center: Vor der Installation wird angezeigt, wie lange sie ungefähr dauert; PiNAS merkt sich die Dauer jedes Updates und schätzt beim nächsten Mal genauer

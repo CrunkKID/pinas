@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "_clock.html" import countdown_clock %}
+{% from "_power.html" import power_btn with context %}
 {% block title %}Dashboard{% endblock %}
 {% block hero %}
 <section class="hero"><div class="inner">
@@ -12,27 +14,11 @@
 data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}"{% if id in layout.hidden %} data-off{% endif %}
 {%- endmacro %}
 
-{% macro power_btn(action, label, title, confirm, ok, danger=False) -%}
-<form method="post" action="{{ url_for('dashboard.power', action=action) }}" class="inline"
-      data-confirm="{{ confirm }}" data-confirm-title="{{ title }}" data-confirm-ok="{{ ok }}"{% if danger %} data-confirm-danger{% endif %}>
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <button class="btn-sm">{{ label }}</button>
-</form>
-{%- endmacro %}
-
 <div class="dash-bar">
   <p class="dash-hint muted" hidden>Kacheln mit dem Schalter ein- oder ausblenden, mit den Pfeilen oder per Ziehen verschieben.</p>
+  {# Herunterfahren/Neustart stehen in der Kopfzeile jeder Seite (base.html), hier nur die Festplatte #}
   {% if user.is_admin and not power.pending %}
-  <div class="power-bar" role="group" aria-label="PiNAS ein- und ausschalten">
-    {{ power_btn('herunterfahren', '⏻ Herunterfahren', 'PiNAS herunterfahren?',
-                 'PiNAS fährt sofort herunter. Netzlaufwerk und Weboberfläche sind danach nicht mehr erreichbar. Zum Einschalten den Strom kurz trennen und wieder einstecken.',
-                 'Herunterfahren', True) }}
-    {{ power_btn('neustart', '↻ Neustart', 'PiNAS neu starten?',
-                 'PiNAS startet neu und ist etwa 1–2 Minuten nicht erreichbar. Laufende Kopiervorgänge werden abgebrochen.',
-                 'Neu starten') }}
-    {{ power_btn('sicher-herunterfahren', '🛡 Sicheres Herunterfahren', 'Sicher herunterfahren?',
-                 'Zuerst wird die Festplatte sauber abgemeldet und ausgeschaltet, 2 Minuten später fährt PiNAS herunter. So ist die Platte garantiert zur Ruhe gekommen.',
-                 'Sicher herunterfahren', True) }}
+  <div class="power-bar" role="group" aria-label="Festplatte ein- und ausschalten">
     {% if power.disk_off %}
     {{ power_btn('festplatte-an', '💽 Festplatte einschalten', 'Festplatte einschalten?',
                  'Die Festplatte wird wieder eingehängt, Netzlaufwerk und Dateien sind danach wieder erreichbar.',
@@ -46,18 +32,44 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
   {% endif %}
   <button type="button" class="btn-sm" id="dash-reset" hidden>Zurücksetzen</button>
   <button type="button" class="btn-sm" id="dash-edit">✎ Dashboard anpassen</button>
+  {% if user.is_admin %}
+  <button type="button" class="btn-sm" id="dash-options-btn" aria-haspopup="dialog">⚙ Optionen</button>
+  {% endif %}
 </div>
 
-{% if power.pending %}
-<div class="flash error power-pending">
-  <span><b>{{ {'shutdown': 'PiNAS fährt herunter', 'reboot': 'PiNAS startet neu', 'update-reboot': 'PiNAS startet nach dem Update neu', 'safe-shutdown': 'Sicheres Herunterfahren: PiNAS fährt herunter'}.get(power.pending.action, 'PiNAS fährt herunter') }}</b>
-    um {{ power.pending.at_text }} – noch <b class="power-countdown" data-at="{{ power.pending.at }}">…</b></span>
-  {% if user.is_admin %}
-  <form method="post" action="{{ url_for('dashboard.power', action='abbrechen') }}" class="inline">
+{% if user.is_admin %}
+<dialog id="dash-options" class="dialog" aria-labelledby="dash-options-title">
+  <form method="post" action="{{ url_for('dashboard.save_options') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button class="btn-sm">Abbrechen</button>
+    <h3 id="dash-options-title">Optionen</h3>
+    <p>Diese Einstellungen gelten für das ganze PiNAS und sind nur für Administratoren.</p>
+    <label class="check option-row">
+      <input type="checkbox" name="show_system_disk" value="1"{% if options.show_system_disk %} checked{% endif %}>
+      <span><b>Systemlaufwerk anzeigen</b><br>
+        <small class="muted">Das Laufwerk, auf dem PiNAS selbst läuft (meist die SD-Karte), erscheint unter „Laufwerke“.
+          Normalerweise ist es verborgen. Andere Benutzer sehen es nie.</small></span>
+    </label>
+    <div class="dialog-actions">
+      <button type="button" id="dash-options-cancel">Abbrechen</button>
+      <button class="primary">Speichern</button>
+    </div>
   </form>
-  {% endif %}
+</dialog>
+{% endif %}
+
+{% if power.pending and power.pending.action == 'update-reboot' %}
+<div class="card reboot-box">
+  {{ countdown_clock(power.pending.at) }}
+  <div>
+    <h2>✓ Update erfolgreich installiert</h2>
+    <p>PiNAS startet gleich neu und ist danach in etwa 1 Minute wieder erreichbar.</p>
+    {% if user.is_admin %}
+    <form method="post" action="{{ url_for('dashboard.power', action='abbrechen') }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn-sm">Neustart abbrechen</button>
+    </form>
+    {% endif %}
+  </div>
 </div>
 {% endif %}
 
@@ -176,6 +188,7 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
 {% for d in devices %}
 <div class="card">
   <strong>{{ d.alias or '/dev/' ~ d.name }}</strong>
+  {% if d.system %}<span class="sys-badge" title="Hier laufen Raspberry Pi OS und PiNAS – nicht für Daten gedacht">Systemlaufwerk</span>{% endif %}
   <span class="muted">{% if d.alias %}/dev/{{ d.name }} · {% endif %}{{ d.model }} · {{ d.tran|upper }} · {{ d.size|filesize }}</span>
   {% if d.parts %}
   <table class="list compact">
@@ -199,14 +212,12 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
 <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
 <script src="{{ url_for('static', filename='dashboard-edit.js') }}"></script>
 <script>
-  // Restzeit bis zum Herunterfahren/Neustart
-  document.querySelectorAll(".power-countdown").forEach((el) => {
-    const tick = () => {
-      const s = Math.max(0, Math.round(+el.dataset.at - Date.now() / 1000));
-      el.textContent = s > 59 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} Min` : `${s} s`;
-      if (s > 0) setTimeout(tick, 1000);
-    };
-    tick();
-  });
+  // Optionsfenster (nur Admins)
+  const optDialog = document.getElementById("dash-options");
+  if (optDialog) {
+    document.getElementById("dash-options-btn").addEventListener("click", () => optDialog.showModal());
+    document.getElementById("dash-options-cancel").addEventListener("click", () => optDialog.close());
+    optDialog.addEventListener("click", (e) => { if (e.target === optDialog) optDialog.close(); });
+  }
 </script>
 {% endblock %}

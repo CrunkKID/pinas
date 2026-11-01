@@ -50,6 +50,18 @@ fi
 
 echo "==> Benutzer und Gruppen"
 getent group nasusers >/dev/null || groupadd --system nasusers
+# „Privat“ richtet jeder Benutzer selbst ein (Gruppe pinasprivat). Beim ersten Anlegen der Gruppe
+# behalten bestehende Benutzer, die schon private Dateien haben, ihren privaten Ordner.
+if ! getent group pinasprivat >/dev/null; then
+  groupadd --system pinasprivat
+  [[ "$PINAS_SHARED_MODE" == "root" ]] && OLD_USERS="$PINAS_DATA/.pinas/users" || OLD_USERS="$PINAS_DATA/users"
+  while IFS=: read -r u _ _ _ gecos _; do
+    [[ "$gecos" == "pinas-managed" ]] || continue
+    if [[ -d "$OLD_USERS/$u" && -n "$(ls -A "$OLD_USERS/$u" 2>/dev/null)" ]]; then
+      usermod -aG pinasprivat "$u"
+    fi
+  done < <(getent passwd)
+fi
 id pinas &>/dev/null || useradd --system --home-dir "$STATE" --shell /usr/sbin/nologin pinas
 # "video" erlaubt vcgencmd (Unterspannungs-Anzeige im Dashboard)
 usermod -aG video pinas

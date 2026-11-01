@@ -1,6 +1,6 @@
 from flask import Blueprint, current_app, flash, g, redirect, render_template, request, url_for
 
-from . import quota, users
+from . import private, quota, users
 from .auth import admin_required, helper
 from .config import storage
 from .db import get_db
@@ -12,7 +12,8 @@ bp = Blueprint("admin", __name__, url_prefix="/benutzer")
 @admin_required
 def index():
     rows = users.list_users(get_db())
-    return render_template("users.html", users=rows, space={u["username"]: quota.info(u["username"]) for u in rows})
+    return render_template("users.html", users=rows, space={u["username"]: quota.info(u["username"]) for u in rows},
+                           has_private={u["username"]: private.enabled(u["username"]) for u in rows})
 
 
 @bp.post("/<username>/speicher")

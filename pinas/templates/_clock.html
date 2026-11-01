@@ -1,0 +1,16 @@
+{# Ablaufende Uhr bis zum Neustart (Update-Center und Dashboard), animiert von static/countdown.js #}
+{% macro countdown_clock(at, total=15) -%}
+<div class="clock" data-at="{{ at }}" data-total="{{ total }}" role="timer">
+  <svg viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="clock-track" cx="60" cy="60" r="52"/>
+    <circle class="clock-ring" cx="60" cy="60" r="52" pathLength="100" stroke-dasharray="100 100" transform="rotate(-90 60 60)"/>
+    {% for i in range(12) %}<line class="clock-tick" x1="60" y1="14" x2="60" y2="19" transform="rotate({{ i * 30 }} 60 60)"/>{% endfor %}
+    <circle class="clock-hand" cx="60" cy="8" r="6"/>
+  </svg>
+  <div class="clock-text">
+    <span class="clock-label">Neu Start in</span>
+    <b class="clock-s">{{ total }}</b>
+    <span class="clock-unit">Sekunden</span>
+  </div>
+</div>
+{%- endmacro %}
