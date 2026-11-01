@@ -47,7 +47,10 @@ Ein Netzwerkkabel ist für ein NAS aber deutlich schneller als WLAN.
 ## 3. Erster Start
 
 1. SD-Karte und USB-Festplatte in den Pi, einschalten, ca. 2–3 Minuten warten.
-2. Im Browser **http://pinas.local:8080** öffnen (oder `http://<IP-des-Pi>:8080`, die IP steht im Router).
+2. Im Browser **https://pinas.local** öffnen (oder `https://<IP-des-Pi>`, die IP steht am Pi-Bildschirm).
+   Die Verbindung ist verschlüsselt. Beim ersten Mal warnt der Browser, weil er das PiNAS-Zertifikat
+   noch nicht kennt: *Erweitert → Weiter zu pinas.local*. Unter **Sichere Verbindung**
+   (Link auf der Anmeldeseite) das Zertifikat einmal pro Gerät installieren – dann ist die Warnung weg.
 3. **Einrichtungsassistent**: Administrator-Konto anlegen.
 4. Seite **Laufwerk**: USB-Platte wählen → *Formatieren & verwenden* (löscht die Platte) oder eine
    vorhandene ext4-Partition mit *Verwenden* übernehmen.

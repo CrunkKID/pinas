@@ -26,6 +26,8 @@ chmod +x "$WORK/stage-pinas/prerun.sh" "$WORK/stage-pinas/00-pinas/00-run.sh"
 # Nur das PiNAS-Image exportieren, nicht zusätzlich das normale Lite-Image
 touch "$WORK/stage2/SKIP_IMAGES"
 cp "$ROOT/image/config" "$WORK/config"
+# Zufälliges Einmal-Passwort (wird nirgends gespeichert und im Image gesperrt, siehe config)
+echo "FIRST_USER_PASS=\"$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')\"" >> "$WORK/config"
 
 cd "$WORK"
 rm -rf deploy

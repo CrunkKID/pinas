@@ -7,6 +7,11 @@ KEYBOARD_KEYMAP="de"
 KEYBOARD_LAYOUT="German"
 TIMEZONE_DEFAULT="Europe/Berlin"
 WPA_COUNTRY="DE"
-# Benutzer, WLAN und SSH werden im Raspberry Pi Imager festgelegt (OS-Anpassung)
+# WLAN, SSH und ein eigener Linux-Benutzer werden optional im Raspberry Pi Imager festgelegt.
+# Damit beim ersten Start KEIN blauer Einrichtungs-Assistent (Tastatur, Benutzername) erscheint,
+# bekommt das Image einen festen Systembenutzer. Sein Passwort erzeugt build.sh zufällig, und
+# im Image wird es gesperrt – mit ihm kann sich niemand anmelden.
+FIRST_USER_NAME="piadmin"
+DISABLE_FIRST_BOOT_USER_RENAME=1
 ENABLE_SSH=0
 STAGE_LIST="stage0 stage1 stage2 stage-pinas"

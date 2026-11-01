@@ -1,6 +1,6 @@
 [Unit]
 Description=PiNAS-Adresse am Bildschirm anzeigen
-After=network-online.target
+After=network-online.target pinas-cert.service
 Wants=network-online.target
 
 [Service]

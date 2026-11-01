@@ -9,12 +9,13 @@ set -euo pipefail
 bash "$(dirname "$0")/setup-system.sh"
 
 systemctl daemon-reload
-systemctl restart smbd pinas
+/usr/local/sbin/pinas-cert
+/usr/local/sbin/pinas-issue
+systemctl restart smbd pinas nginx
 systemctl restart wsdd 2>/dev/null || true
 
-# shellcheck disable=SC1091
-. /etc/default/pinas
 IP="$(hostname -I | awk '{print $1}')"
 echo
-echo "Fertig! Weboberfläche: http://$IP:$PINAS_PORT  (oder http://$(hostname).local:$PINAS_PORT)"
+echo "Fertig! Weboberfläche: https://$(hostname).local  (oder https://$IP)"
+echo "Damit der Browser nicht warnt: dort unter „Sichere Verbindung“ das PiNAS-Zertifikat installieren."
 echo "Beim ersten Aufruf wirst du durch die Einrichtung geführt (Admin-Konto, Festplatte)."

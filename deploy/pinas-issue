@@ -1,9 +1,7 @@
 #!/bin/bash
 # Schreibt den Hinweis über der Anmeldezeile am Pi-Bildschirm mit der aktuellen IP-Adresse.
 # Läuft beim Start (pinas-issue.service) und bei jeder Netzwerkänderung (NetworkManager-Dispatcher).
-PINAS_PORT=8080
-# shellcheck disable=SC1091
-[[ -r /etc/default/pinas ]] && . /etc/default/pinas
+CA=/etc/pinas/tls/ca.crt
 
 ips="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.' || true)"
 {
@@ -11,10 +9,15 @@ ips="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.' || true)"
   if [[ -n "$ips" ]]; then
     echo "  PiNAS laeuft. Bedienung im Browser eines anderen Geraets (PC, Handy):"
     echo
+    echo "      https://$(hostname).local"
     for ip in $ips; do
-      echo "      http://$ip:$PINAS_PORT"
+      echo "      https://$ip"
     done
-    echo "      http://$(hostname).local:$PINAS_PORT"
+    if [[ -r $CA ]]; then
+      echo
+      echo "  Fingerabdruck des PiNAS-Zertifikats (zum Vergleichen beim Installieren):"
+      echo "      $(openssl x509 -in "$CA" -noout -fingerprint -sha1 | cut -d= -f2)"
+    fi
   else
     echo "  PiNAS laeuft, hat aber noch KEINE Netzwerkverbindung."
     echo "  Netzwerkkabel einstecken oder WLAN im Raspberry Pi Imager einrichten."

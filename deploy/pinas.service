@@ -10,7 +10,11 @@ Group=pinas
 WorkingDirectory=/opt/pinas
 Environment=PINAS_STATE=/var/lib/pinas
 Environment=PINAS_HELPER=/usr/local/sbin/pinas-helper
-# Enthält PINAS_DATA und PINAS_PORT
+# Nur lokal erreichbar – von außen geht es über nginx mit https (siehe nginx-pinas.conf)
+Environment=PINAS_HOST=127.0.0.1
+Environment=PINAS_PORT=8081
+Environment=PINAS_PROXY=1
+# Enthält PINAS_DATA und PINAS_SHARED_MODE
 EnvironmentFile=/etc/default/pinas
 ExecStart=/usr/bin/python3 -m pinas
 Restart=on-failure

@@ -11,14 +11,13 @@ STATE=/var/lib/pinas
 
 # Einstellungen: vorhandene /etc/default/pinas behalten, sonst Standardwerte
 PINAS_DATA="${PINAS_DATA:-/srv/nas}"
-PINAS_PORT="${PINAS_PORT:-8080}"
 PINAS_SHARED_MODE="${PINAS_SHARED_MODE:-folder}"
 # shellcheck disable=SC1091
 [[ -r /etc/default/pinas ]] && . /etc/default/pinas
+# PINAS_PORT früherer Versionen fällt weg: Die App lauscht fest auf 127.0.0.1:8081 hinter nginx (https)
 cat > /etc/default/pinas <<EOF
 # PiNAS-Einstellungen (nach Änderung: sudo systemctl restart pinas)
 PINAS_DATA=$PINAS_DATA
-PINAS_PORT=$PINAS_PORT
 # folder = eigene Ordner users/ und shared/, root = „Gemeinsam“ zeigt die ganze Platte
 PINAS_SHARED_MODE=$PINAS_SHARED_MODE
 EOF
@@ -29,7 +28,8 @@ echo "==> Pakete"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 # ntfs-3g/exfatprogs: Platten vom Windows-PC ohne Formatieren verwenden
-apt-get install -y samba python3 python3-flask python3-waitress rsync sudo hdparm sdparm ntfs-3g exfatprogs
+apt-get install -y samba python3 python3-flask python3-waitress rsync sudo hdparm sdparm ntfs-3g exfatprogs \
+  nginx openssl
 # Samba-Modul "recycle" für den Papierkorb beim Netzlaufwerk (je nach Debian-Version schon in samba enthalten)
 apt-get install -y samba-vfs-modules || echo "samba-vfs-modules nicht verfügbar – übersprungen"
 # Damit das NAS in der Windows-Netzwerkumgebung auftaucht (optional)
@@ -86,11 +86,25 @@ mkdir -p /etc/issue.d
 install -m 0755 -o root -g root "$SRC/deploy/pinas-issue" /usr/local/sbin/pinas-issue
 install -m 0644 "$SRC/deploy/pinas-issue.service" /etc/systemd/system/pinas-issue.service
 if [[ -d /etc/NetworkManager/dispatcher.d ]]; then
-  printf '#!/bin/sh\n/usr/local/sbin/pinas-issue\n' > /etc/NetworkManager/dispatcher.d/90-pinas-issue
+  # Neue IP-Adresse: Zertifikat anpassen und Hinweis aktualisieren
+  printf '#!/bin/sh\n/usr/local/sbin/pinas-cert\n/usr/local/sbin/pinas-issue\n' > /etc/NetworkManager/dispatcher.d/90-pinas-issue
   chmod 0755 /etc/NetworkManager/dispatcher.d/90-pinas-issue
 fi
 /usr/local/sbin/pinas-issue
 systemctl enable pinas-issue
+
+echo "==> Verschlüsselte Weboberfläche (https)"
+# Die Zertifikate entstehen erst auf dem Pi beim ersten Start (pinas-cert.service) –
+# jedes Gerät bekommt so seine eigene Zertifizierungsstelle, nichts davon steckt im Image.
+install -m 0755 -o root -g root "$SRC/deploy/pinas-cert" /usr/local/sbin/pinas-cert
+install -m 0644 "$SRC/deploy/pinas-cert.service" /etc/systemd/system/pinas-cert.service
+install -m 0644 "$SRC/deploy/pinas-cert.timer" /etc/systemd/system/pinas-cert.timer
+install -m 0644 "$SRC/deploy/nginx-pinas.conf" /etc/nginx/sites-available/pinas
+ln -sf /etc/nginx/sites-available/pinas /etc/nginx/sites-enabled/pinas
+rm -f /etc/nginx/sites-enabled/default
+mkdir -p /etc/systemd/system/nginx.service.d
+printf '[Unit]\nWants=pinas-cert.service\nAfter=pinas-cert.service\n' > /etc/systemd/system/nginx.service.d/pinas.conf
+systemctl enable pinas-cert.service pinas-cert.timer nginx
 
 echo "==> Energiesparen für die Festplatte"
 install -m 0755 -o root -g root "$SRC/deploy/pinas-diskpower" /usr/local/sbin/pinas-diskpower

@@ -1,0 +1,12 @@
+[Unit]
+Description=PiNAS-Zertifikate fuer https erzeugen
+After=network-online.target cloud-init.service
+Wants=network-online.target
+Before=nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pinas-cert
+
+[Install]
+WantedBy=multi-user.target

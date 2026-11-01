@@ -1,0 +1,64 @@
+#!/bin/bash
+# Erzeugt die Zertifikate für die verschlüsselte Weboberfläche (https).
+# - Eigene Zertifizierungsstelle (CA) pro Gerät, einmalig beim ersten Start erzeugt.
+#   Sie darf per Name Constraints NUR Adressen im Heimnetz (*.local, private IPs) bestätigen –
+#   selbst wenn jemand ihren Schlüssel stiehlt, taugt sie nicht für fremde Webseiten.
+# - Server-Zertifikat für <hostname>.local und die aktuellen IPv4-Adressen; wird neu ausgestellt,
+#   wenn sich Name oder IP ändern oder es bald abläuft. Die CA bleibt dabei gleich.
+# Läuft beim Start (pinas-cert.service), täglich (Timer) und bei Netzwerkänderungen (Dispatcher).
+set -euo pipefail
+
+DIR=/etc/pinas/tls
+mkdir -p "$DIR"
+chmod 0755 "$DIR"
+cd "$DIR"
+umask 077
+
+changed=0
+
+if [[ ! -s ca.key || ! -s ca.crt ]]; then
+  openssl req -x509 -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+    -keyout ca.key.new -out ca.crt.new -subj "/O=PiNAS/CN=PiNAS $(hostname) Zertifizierungsstelle" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    -addext "nameConstraints=critical,permitted;DNS:local,permitted;IP:10.0.0.0/255.0.0.0,permitted;IP:172.16.0.0/255.240.0.0,permitted;IP:192.168.0.0/255.255.0.0,permitted;IP:100.64.0.0/255.192.0.0" \
+    2>/dev/null
+  mv ca.key.new ca.key
+  mv ca.crt.new ca.crt
+  rm -f server.crt
+  changed=1
+fi
+chmod 0600 ca.key
+chmod 0644 ca.crt
+
+san="DNS:$(hostname).local"
+for ip in $(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.' || true); do
+  san+=",IP:$ip"
+done
+
+if [[ ! -s server.crt || ! -s server.key || "$(cat san.txt 2>/dev/null)" != "$san" ]] \
+   || ! openssl x509 -in server.crt -noout -checkend $((30 * 86400)) >/dev/null 2>&1; then
+  openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+    -keyout server.key.new -out server.csr -subj "/O=PiNAS/CN=$(hostname).local" 2>/dev/null
+  printf '%s\n' \
+    "basicConstraints=critical,CA:FALSE" \
+    "keyUsage=critical,digitalSignature" \
+    "extendedKeyUsage=serverAuth" \
+    "subjectAltName=$san" \
+    "subjectKeyIdentifier=hash" \
+    "authorityKeyIdentifier=keyid" > server.ext
+  openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -set_serial "0x$(openssl rand -hex 16)" \
+    -days 397 -sha256 -extfile server.ext -out server.crt.new 2>/dev/null
+  mv server.key.new server.key
+  mv server.crt.new server.crt
+  echo "$san" > san.txt
+  rm -f server.csr server.ext
+  changed=1
+fi
+chmod 0600 server.key
+chmod 0644 server.crt
+
+# Laufenden Webserver das neue Zertifikat laden lassen
+if [[ $changed -eq 1 ]] && systemctl is-active --quiet nginx; then
+  systemctl reload nginx || true
+fi
