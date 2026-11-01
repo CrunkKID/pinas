@@ -9,7 +9,7 @@
 {% block content %}
 
 {% if source %}
-<div class="flash ok">NAS-Speicher: <b>{{ source }}</b> ist unter {{ data_dir }} eingehängt.</div>
+<div class="flash ok">NAS-Speicher: <b>{{ source }}</b>{% if fstype %} ({{ fstype }}){% endif %} ist unter {{ data_dir }} eingehängt.</div>
 {% else %}
 <div class="flash error">Noch keine Festplatte eingerichtet – Daten liegen auf der SD-Karte.
   Schließe eine USB-Platte an und wähle sie unten aus.</div>
@@ -17,7 +17,18 @@
 
 {% for d in disks %}
 <div class="card">
-  <strong>/dev/{{ d.name }}</strong> <span class="muted">{{ d.model }} · {{ d.tran|upper }} · {{ d.size|filesize }}</span>
+  <div class="disk-head">
+    <div>
+      <div class="disk-title">{{ d.alias or (d.model if d.model != '–' else 'Festplatte') }}</div>
+      <span class="muted">/dev/{{ d.name }} · {{ d.model }} · {{ d.tran|upper }} · {{ d.size|filesize }}</span>
+    </div>
+    <form method="post" action="{{ url_for('disk.rename') }}" class="rename-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="device" value="{{ d.name }}">
+      <input name="alias" value="{{ d.alias }}" maxlength="40" placeholder="Name, z. B. Fotos-Platte" aria-label="Name der Festplatte">
+      <button class="btn-sm">{{ 'Umbenennen' if d.alias else 'Benennen' }}</button>
+    </form>
+  </div>
   {% if d.parts %}
   <table class="list compact">
     <thead><tr><th>Partition</th><th>Dateisystem</th><th class="num">Größe</th><th>Eingehängt</th><th></th></tr></thead>
@@ -25,14 +36,19 @@
     {% for p in d.parts %}
       <tr>
         <td>{{ p.name }}{% if p.label %} <small class="muted">({{ p.label }})</small>{% endif %}</td>
-        <td>{{ p.fstype }}</td><td class="num">{{ p.size|filesize }}</td><td>{{ p.mount or '–' }}</td>
+        <td>{{ {'ntfs': 'NTFS (Windows)', 'exfat': 'exFAT', 'ext4': 'ext4 (Linux)', 'vfat': 'FAT32'}.get(p.fstype, p.fstype) }}</td>
+        <td class="num">{{ p.size|filesize }}</td><td>{{ p.mount or '–' }}</td>
         <td class="actions">
-          {% if p.fstype == 'ext4' and not p.mount %}
-          <form method="post" action="{{ url_for('disk.use') }}" class="inline disk-form">
+          {% if p.fstype in ('ext4', 'ntfs', 'exfat') and not p.mount %}
+          <form method="post" action="{{ url_for('disk.use') }}" class="keep-form disk-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="device" value="{{ p.name }}">
             <input type="hidden" name="mode" value="keep">
-            <button class="btn-sm" title="Vorhandene Daten bleiben erhalten">Verwenden</button>
+            <select name="layout" aria-label="Was soll mit den vorhandenen Dateien passieren?">
+              <option value="root"{% if p.fstype != 'ext4' %} selected{% endif %}>Vorhandene Dateien in „Gemeinsam“ zeigen</option>
+              <option value="folder"{% if p.fstype == 'ext4' %} selected{% endif %}>Eigene PiNAS-Ordner verwenden</option>
+            </select>
+            <button class="btn-sm" title="Ohne Formatieren – vorhandene Daten bleiben erhalten">Verwenden</button>
           </form>
           {% endif %}
         </td>
@@ -44,13 +60,17 @@
   {% if d.parts|selectattr('mount')|list %}
   <p class="muted">Diese Platte ist in Benutzung.</p>
   {% else %}
-  <form method="post" action="{{ url_for('disk.use') }}" class="format-form disk-form">
+  <form method="post" action="{{ url_for('disk.use') }}" class="format-form disk-form"
+        data-confirm="Alle Daten auf „{{ d.alias or d.model }}“ (/dev/{{ d.name }}, {{ d.size|filesize }}) werden unwiderruflich gelöscht – sie landen NICHT im Papierkorb."
+        data-confirm-title="Wirklich formatieren?" data-confirm-ok="Jetzt formatieren" data-confirm-danger>
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="device" value="{{ d.name }}">
     <input type="hidden" name="mode" value="format">
-    <label>Formatieren löscht <b>alle Daten</b> auf dieser Platte. Zum Bestätigen „{{ d.name }}“ eintippen:
-      <input name="confirm" autocomplete="off" placeholder="{{ d.name }}" required></label>
-    <button class="danger">Formatieren &amp; verwenden</button>
+    <label>Formatieren löscht <b>alle Daten</b> auf dieser Platte. Zum Bestätigen das Wort <b>formatieren</b> eintippen:
+      <input name="confirm" class="format-word" autocomplete="off" autocapitalize="none" spellcheck="false"
+             placeholder="formatieren" required pattern="\s*[Ff][Oo][Rr][Mm][Aa][Tt][Ii][Ee][Rr][Ee][Nn]\s*"
+             title="Bitte das Wort „formatieren“ eintippen"></label>
+    <button class="danger format-btn" disabled>Formatieren &amp; verwenden</button>
   </form>
   {% endif %}
 </div>
@@ -58,8 +78,81 @@
 <p class="muted">Keine USB-Festplatte gefunden. Platte anschließen und Seite neu laden.</p>
 {% endfor %}
 
-<p class="muted">Dateien, die bisher auf der SD-Karte lagen, werden beim Einrichten auf die Platte kopiert.
-  Formatieren dauert meist unter einer Minute.</p>
+<p class="muted">„Verwenden“ übernimmt eine Platte <b>ohne Formatieren</b> – auch NTFS- und exFAT-Platten vom
+  Windows-PC. Dateien, die bisher auf der SD-Karte lagen, werden beim Einrichten auf die Platte kopiert.
+  Windows-Platten vorher am PC mit „Hardware sicher entfernen“ abmelden.</p>
+
+{% if source %}
+<h2 id="aufteilung">Ordner-Aufteilung</h2>
+<form method="post" action="{{ url_for('disk.layout') }}" class="card layout-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label class="choice">
+    <input type="radio" name="layout" value="root"{% if layout == 'root' %} checked{% endif %}>
+    <span><b>Ganze Platte als „Gemeinsam“</b><br>
+      <small class="muted">Alle Dateien auf der Platte – z. B. vom Windows-PC – sind für alle Benutzer sichtbar.
+        Private Ordner liegen versteckt im Ordner „.pinas“.</small></span>
+  </label>
+  <label class="choice">
+    <input type="radio" name="layout" value="folder"{% if layout == 'folder' %} checked{% endif %}>
+    <span><b>Eigene PiNAS-Ordner</b><br>
+      <small class="muted">„Gemeinsam“ und die privaten Ordner liegen in eigenen Ordnern („shared“, „users“).
+        Andere Dateien auf der Platte bleiben unangetastet, sind in PiNAS aber nicht sichtbar.</small></span>
+  </label>
+  <div><button class="primary">Speichern</button></div>
+  <small class="muted">Beim Umstellen werden die privaten Ordner automatisch mitgenommen. Es wird nichts gelöscht.</small>
+</form>
+{% endif %}
+
+<h2 id="energie">Energiesparen</h2>
+<div class="card">
+  {% if power_status and power_status.disk %}
+  <p class="power-state">
+    <span class="dot {{ 'sleep' if power_status.state == 'standby' else 'ok' }}"></span>
+    <b>{{ aliases.get(power_status.disk) or 'Platte ' ~ power_status.disk }}</b>:
+    {% if power_status.state == 'standby' %}im Ruhezustand{% if power_status.since_text %} seit {{ power_status.since_text }}{% endif %}
+    {% else %}aktiv{% endif %}
+    {% if power_status.in_window %}<span class="muted">· Zeitplan aktiv</span>{% endif %}
+  </p>
+  {% elif power_status %}
+  <p class="muted">Energiesparen ist nur für USB-Festplatten verfügbar. Richte oben zuerst eine Platte ein.</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('disk.power') }}" class="power-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Ruhezustand nach Inaktivität
+      <select name="idle_minutes">
+        {% for m in idle_choices %}
+          <option value="{{ m }}"{% if power.idle_minutes == m %} selected{% endif %}>
+            {{ 'Nie' if m == 0 else (m ~ ' Minuten' if m < 60 else (m // 60) ~ (' Stunde' if m == 60 else ' Stunden')) }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <fieldset class="schedule">
+      <label class="check"><input type="checkbox" name="schedule_enabled" value="1" id="schedule-enabled"
+        {% if power.schedule_enabled %}checked{% endif %}> Zeitplan: Platte nachts ausschalten</label>
+      <div class="schedule-times">
+        <label>Ausschalten ab<input type="time" name="start" value="{{ power.start }}" required></label>
+        <label>Wieder einschalten um<input type="time" name="end" value="{{ power.end }}" required></label>
+      </div>
+      <small class="muted">Im Zeitraum geht die Platte schon nach 2 Minuten ohne Zugriff schlafen.
+        Zum Ende wird sie automatisch wieder eingeschaltet.</small>
+    </fieldset>
+
+    <div class="power-actions">
+      <button class="primary">Speichern</button>
+    </div>
+  </form>
+
+  <form method="post" action="{{ url_for('disk.sleep_now') }}" class="inline power-now">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button {% if not (power_status and power_status.disk) %}disabled{% endif %}>Jetzt schlafen legen</button>
+  </form>
+
+  <p class="muted power-note">Im Ruhezustand steht der Motor still: leise und sparsam. Bei einem Zugriff wacht die
+    Platte von selbst auf, das dauert ein paar Sekunden. Für SSDs ist das nicht nötig.</p>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -67,5 +160,13 @@
     f.querySelector("button").disabled = true;
     f.querySelector("button").textContent = "Bitte warten …";
   }));
+  // Formatieren-Knopf erst freigeben, wenn das Wort „formatieren“ eingetippt ist
+  document.querySelectorAll(".format-form").forEach((f) => {
+    const word = f.querySelector(".format-word");
+    const btn = f.querySelector(".format-btn");
+    word.addEventListener("input", () => {
+      btn.disabled = word.value.trim().toLowerCase() !== "formatieren";
+    });
+  });
 </script>
 {% endblock %}
