@@ -1,0 +1,11 @@
+[Unit]
+Description=PiNAS-Adresse am Bildschirm anzeigen
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pinas-issue
+
+[Install]
+WantedBy=multi-user.target
