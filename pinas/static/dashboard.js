@@ -15,11 +15,24 @@
       if (s.temp != null) set("temp", `${s.temp.toFixed(1).replace(".", ",")} °C`);
       if (s.load) set("load", s.load.join(" · "));
       if (s.uptime) { set("uptime", s.uptime.text); set("boot", s.uptime.since); }
+      if (s.history) {
+        if (s.history.total_text) set("uptime-total", s.history.total_text);
+        if (s.history.temp_max != null) {
+          set("temp-max", `${s.history.temp_max.toFixed(1).replace(".", ",")} °C`);
+          set("temp-max-at", s.history.temp_max_at_text ? `am ${s.history.temp_max_at_text}` : "");
+        }
+      }
       if (s.io) { set("io-read", fmt(s.io.read)); set("io-written", fmt(s.io.written)); }
+      if (s.net) set("net-total", `${fmt(s.net.rx)} empfangen, ${fmt(s.net.tx)} gesendet`);
       set("throttled", s.throttled || "–");
+      const pct = s.disk.total ? (s.disk.used / s.disk.total) * 100 : 0;
       set("disk-used", fmt(s.disk.used));
-      set("disk-free", `${fmt(s.disk.free)} frei von ${fmt(s.disk.total)}`);
-      document.getElementById("disk-bar").style.width = (s.disk.used / s.disk.total * 100) + "%";
+      set("disk-free", fmt(s.disk.free));
+      set("disk-total", fmt(s.disk.total));
+      set("donut-pct", `${Math.round(pct)} %`);
+      set("donut-title", `${Math.round(pct)} % belegt: ${fmt(s.disk.used)} von ${fmt(s.disk.total)}`);
+      document.getElementById("donut-used").setAttribute("stroke-dasharray", `${pct.toFixed(2)} 100`);
+      document.getElementById("disk-warn").hidden = pct < 90;
       if (s.memory) {
         set("mem", fmt(s.memory.used));
         document.getElementById("mem-bar").style.width = (s.memory.used / s.memory.total * 100) + "%";
