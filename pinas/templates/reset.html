@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Wird zurückgesetzt{% endblock %}
+{% block mainclass %}login-wrap{% endblock %}
+{% block content %}
+<div class="card login reset-wait">
+  <div class="brand big"><span class="logo"></span>PiNAS</div>
+  <h1><span class="spinner"></span> Wird <b>zurückgesetzt</b></h1>
+  <p class="muted">Benutzer und Einstellungen werden gelöscht{% if wipe %} und die Festplatte wird geleert{% endif %}.
+    Das dauert etwa eine Minute. Danach erscheint automatisch die Ersteinrichtung.</p>
+  <p class="muted" id="reset-state">Bitte warten …</p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  // Warten, bis die frisch zurückgesetzte Weboberfläche die Ersteinrichtung zeigt
+  const state = document.getElementById("reset-state");
+  let tries = 0;
+  const poll = async () => {
+    tries++;
+    try {
+      const r = await fetch("{{ url_for('auth.setup') }}", { cache: "no-store", redirect: "manual" });
+      if (r.status === 200) { location.href = "{{ url_for('auth.setup') }}"; return; }
+    } catch {}
+    if (tries > 45) state.textContent = "Das dauert länger als üblich – die Seite einfach später neu laden.";
+    setTimeout(poll, 4000);
+  };
+  setTimeout(poll, 6000);
+</script>
+{% endblock %}

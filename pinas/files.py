@@ -53,6 +53,9 @@ def hidden_names(root: str) -> frozenset:
 
 
 def root_dir(root: str) -> Path:
+    # Festplatte im Dashboard ausgeschaltet: nichts auf die SD-Karte darunter schreiben
+    if Path("/run/pinas/disk-off").exists():
+        abort(503, "Die Festplatte ist ausgeschaltet. Im Dashboard oben rechts mit „Festplatte einschalten“ wieder aktivieren.")
     paths = storage(current_app.config)
     if root == "privat":
         base = paths["users"] / g.user["username"]

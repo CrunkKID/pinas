@@ -10,9 +10,11 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
+from . import users
 from .auth import admin_required, helper
+from .db import get_db
 from .helper import HelperError
 
 bp = Blueprint("updates", __name__, url_prefix="/update")
@@ -168,6 +170,27 @@ def download():
         return redirect(url_for("updates.index"))
     _stage(dest)
     return redirect(url_for("updates.index"))
+
+
+@bp.post("/werkseinstellungen")
+@admin_required
+def factory_reset():
+    """Alle Benutzer und Einstellungen löschen; auf Wunsch auch die Festplatte leeren."""
+    f = request.form
+    wipe = f.get("wipe") == "1"
+    word = "alles löschen" if wipe else "zurücksetzen"
+    if not users.verify(get_db(), g.user["username"], f.get("password", "")):
+        flash("Das Passwort ist falsch – PiNAS wurde nicht zurückgesetzt.", "error")
+    elif f.get("confirm", "").strip().lower() != word:
+        flash(f"Zum Bestätigen bitte genau „{word}“ eintippen.", "error")
+    else:
+        try:
+            helper().factory_reset(wipe)
+            g.user = None  # Warteseite ohne Menü – die Anmeldung gilt danach ohnehin nicht mehr
+            return render_template("reset.html", wipe=wipe)
+        except HelperError as exc:
+            flash(str(exc), "error")
+    return redirect(url_for("updates.index") + "#werkseinstellungen")
 
 
 @bp.post("/<action>")

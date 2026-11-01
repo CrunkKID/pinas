@@ -8,10 +8,11 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from flask import Blueprint, current_app, g, jsonify, render_template, request
+from flask import Blueprint, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
-from .auth import login_required
+from .auth import admin_required, helper, login_required
 from .db import get_db
+from .helper import HelperError
 
 bp = Blueprint("dashboard", __name__)
 
@@ -274,6 +275,47 @@ def stats() -> dict:
     }
 
 
+RUN_DIR = Path("/run/pinas")  # Zustand der Ein/Aus-Knöpfe (geschrieben von pinas-helper)
+
+
+def power_state() -> dict:
+    """Ist die Festplatte ausgeschaltet, und ist ein Herunterfahren/Neustart geplant?"""
+    state = {"disk_off": (RUN_DIR / "disk-off").exists(), "pending": None}
+    try:
+        p = json.loads((RUN_DIR / "power.json").read_text())
+        if p.get("at", 0) > time.time() - 10:
+            p["at_text"] = datetime.fromtimestamp(p["at"]).strftime("%H:%M:%S Uhr")
+            state["pending"] = p
+    except (OSError, ValueError):
+        pass
+    return state
+
+
+# Knöpfe oben rechts: URL-Teil → (Helper-Aktion, Meldung danach)
+POWER_ACTIONS = {
+    "herunterfahren": ("shutdown", "PiNAS fährt jetzt herunter. Nach etwa 30 Sekunden kannst du den Strom trennen."),
+    "neustart": ("reboot", "PiNAS startet neu – in etwa 1–2 Minuten ist es wieder erreichbar."),
+    "sicher-herunterfahren": ("safe-shutdown", "Festplatte ist ausgeschaltet. PiNAS fährt in 2 Minuten herunter."),
+    "festplatte-aus": ("disk-off", "Festplatte ist ausgeschaltet. Netzlaufwerk und Dateien sind nicht erreichbar, bis du sie wieder einschaltest."),
+    "festplatte-an": ("disk-on", "Festplatte ist wieder eingeschaltet."),
+    "abbrechen": ("cancel", "Geplantes Herunterfahren abgebrochen."),
+}
+
+
+@bp.post("/system/<action>")
+@admin_required
+def power(action):
+    if action not in POWER_ACTIONS:
+        return redirect(url_for("dashboard.index"))
+    cmd, message = POWER_ACTIONS[action]
+    try:
+        helper().power(cmd)
+        flash(message, "ok")
+    except HelperError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("dashboard.index"))
+
+
 # Kacheln und Bereiche des Dashboards in der Standard-Reihenfolge
 TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "services", "devices"]
 
@@ -300,7 +342,7 @@ def index():
     data_dir = str(current_app.config["DATA_DIR"])
     data_alias = next((d["alias"] for d in devices if any(p["mount"] == data_dir for p in d["parts"])), "")
     return render_template("dashboard.html", s=stats(), devices=devices, services=services,
-                           data_alias=data_alias, layout=layout())
+                           data_alias=data_alias, layout=layout(), power=power_state())
 
 
 @bp.post("/api/dashboard-layout")

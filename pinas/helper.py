@@ -48,6 +48,14 @@ class SystemHelper:
     def disk_sleep(self) -> None:
         self._run("disk-sleep", timeout=60)
 
+    def power(self, action: str) -> None:
+        """shutdown, reboot, safe-shutdown, disk-off, disk-on oder cancel."""
+        self._run("power", action, timeout=120)
+
+    def factory_reset(self, wipe: bool) -> None:
+        """Startet das Zurücksetzen im Hintergrund; wipe=True leert zusätzlich die Festplatte."""
+        self._run("factory-reset", "wipe" if wipe else "keep", timeout=60)
+
     def update(self, action: str, path: str | None = None) -> str:
         """Update-Center: action "stage" (mit Paketpfad), "apply", "rollback" oder "discard"."""
         return self._run(f"update-{action}", *([path] if path else []), timeout=120)

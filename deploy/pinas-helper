@@ -11,6 +11,8 @@
 #   pinas-helper disk-sleep                 (NAS-Platte sofort in den Ruhezustand)
 #   pinas-helper update-stage DATEI         (Update-Paket prüfen und bereitlegen, siehe pinas-update)
 #   pinas-helper update-apply|update-rollback|update-discard
+#   pinas-helper power shutdown|reboot|safe-shutdown|disk-off|disk-on|cancel
+#   pinas-helper factory-reset keep|wipe    (Werkseinstellungen; wipe leert zusätzlich die Festplatte)
 #
 # Ordner-Aufteilung (PINAS_SHARED_MODE in /etc/default/pinas):
 #   folder  „Gemeinsam“ = DATA/shared,  private Ordner in DATA/users/<name>
@@ -230,6 +232,138 @@ use_disk() {
   systemctl start smbd || true
 }
 
+# ---------------------------------------------------------------- Ein/Aus
+
+RUN_DIR="/run/pinas"
+DISK_OFF_FLAG="$RUN_DIR/disk-off"
+POWER_STATE="$RUN_DIR/power.json"
+SAFE_DELAY=120   # Sekunden zwischen Festplatte aus und Herunterfahren
+
+# Festplatte sauber abmelden: Netzlaufwerk stoppen, aushängen, Motor anhalten
+disk_off() {
+  mountpoint -q "$DATA" || die "Es ist keine Festplatte eingehängt."
+  local src disk root_disk
+  src="$(findmnt -no SOURCE "$DATA")"
+  [[ "$src" == /dev/* ]] || die "Die Festplatte wurde nicht gefunden."
+  disk="$(lsblk -no PKNAME "$src" | head -n1)"
+  disk="/dev/${disk:-${src#/dev/}}"
+  root_disk="/dev/$(lsblk -no PKNAME "$(findmnt -no SOURCE /)")"
+  [[ "$disk" != "$root_disk" ]] || die "Die NAS-Daten liegen auf der SD-Karte – da gibt es nichts auszuschalten."
+  sync
+  systemctl stop smbd || true
+  if ! umount "$DATA"; then
+    systemctl start smbd || true
+    die "Die Festplatte wird gerade noch benutzt (z. B. ein Kopiervorgang). Bitte kurz warten und erneut versuchen."
+  fi
+  sync
+  # Motor anhalten; USB-Gehäuse verstehen je nach Modell den ATA- oder den SCSI-Befehl
+  hdparm -y "$disk" >/dev/null 2>&1 || sdparm --readonly --command=stop "$disk" >/dev/null 2>&1 || true
+  mkdir -p "$RUN_DIR"
+  date +%s > "$DISK_OFF_FLAG"
+  chmod 0644 "$DISK_OFF_FLAG"
+}
+
+disk_on() {
+  rm -f "$DISK_OFF_FLAG"
+  mountpoint -q "$DATA" || mount "$DATA" || die "Die Festplatte ließ sich nicht wieder einhängen. Ist sie noch angeschlossen?"
+  systemctl start smbd || true
+}
+
+# Herunterfahren/Neustart zeitversetzt, damit die Weboberfläche noch antworten kann
+schedule_power() {
+  local action="$1" delay="$2" label="$3"
+  cancel_power
+  systemd-run --quiet --unit=pinas-power --on-active="${delay}s" --timer-property=AccuracySec=1s \
+    /bin/systemctl "$action" || die "Konnte $label nicht planen."
+  mkdir -p "$RUN_DIR"
+  printf '{"action": "%s", "at": %s}\n' "$label" "$(( $(date +%s) + delay ))" > "$POWER_STATE"
+  chmod 0644 "$POWER_STATE"
+}
+
+cancel_power() {
+  systemctl stop pinas-power.timer pinas-power.service 2>/dev/null || true
+  systemctl reset-failed pinas-power.timer pinas-power.service 2>/dev/null || true
+  rm -f "$POWER_STATE"
+}
+
+power() {
+  case "$1" in
+    shutdown)      schedule_power poweroff 5 shutdown ;;
+    reboot)        schedule_power reboot 5 reboot ;;
+    safe-shutdown) disk_off; schedule_power poweroff "$SAFE_DELAY" safe-shutdown ;;
+    disk-off)      disk_off ;;
+    disk-on)       disk_on ;;
+    cancel)        cancel_power ;;
+    *) die "Unbekannte Aktion: $1" ;;
+  esac
+}
+
+# ---------------------------------------------------------------- Werkseinstellungen
+
+STATE_DIR="/var/lib/pinas"
+RESET_STATUS="$RUN_DIR/reset.json"
+
+# Startet das Zurücksetzen als eigenen Dienst – es stoppt die Weboberfläche, die es aufgerufen hat
+factory_reset() {
+  local mode="$1"
+  [[ "$mode" == "keep" || "$mode" == "wipe" ]] || die "Unbekannter Modus: $mode"
+  systemctl is-active --quiet pinas-reset && die "Das Zurücksetzen läuft bereits."
+  systemctl reset-failed pinas-reset 2>/dev/null || true
+  mkdir -p "$RUN_DIR"
+  printf '{"state": "running", "mode": "%s"}\n' "$mode" > "$RESET_STATUS"
+  chmod 0644 "$RESET_STATUS"
+  systemd-run --quiet --unit=pinas-reset --collect --description="PiNAS auf Werkseinstellungen" \
+    /usr/local/sbin/pinas-helper factory-reset-run "$mode" || die "Zurücksetzen konnte nicht gestartet werden."
+}
+
+factory_reset_run() {
+  local mode="$1" src disk u
+  # Bei einem Fehler die Dienste trotzdem wieder starten, damit PiNAS erreichbar bleibt
+  trap 'printf "{\"state\": \"failed\", \"mode\": \"%s\"}\n" "$mode" > "$RESET_STATUS"; systemctl start smbd pinas || true' ERR
+  cancel_power
+  systemctl stop pinas smbd || true
+
+  # NAS-Benutzer entfernen (nur Konten, die PiNAS selbst angelegt hat)
+  while IFS=: read -r u _ _ _ gecos _; do
+    [[ "$gecos" == "$MARK" ]] || continue
+    smbpasswd -x "$u" &>/dev/null || true
+    userdel "$u" &>/dev/null || true
+  done < <(getent passwd)
+
+  # Festplatte abmelden und aus /etc/fstab austragen; bei "wipe" zusätzlich leeren
+  rm -f "$DISK_OFF_FLAG"
+  if mountpoint -q "$DATA"; then
+    src="$(findmnt -no SOURCE "$DATA")"
+    disk="$(lsblk -no PKNAME "$src" | head -n1)"
+    disk="/dev/${disk:-${src#/dev/}}"
+    umount "$DATA" || umount -l "$DATA"
+    if [[ "$mode" == "wipe" && "$disk" == /dev/sd* ]]; then
+      # Dateisystem-Kennungen und Partitionstabelle löschen – die Platte ist danach leer
+      lsblk -lnpo NAME "$disk" | tac | while read -r p; do wipefs -a "$p" >/dev/null 2>&1 || true; done
+      udevadm settle || true
+    fi
+  fi
+  sed -i "\|[[:space:]]${DATA}[[:space:]]|d" /etc/fstab
+  systemctl daemon-reload
+  # Lagen die NAS-Daten auf der SD-Karte, werden bei "wipe" auch diese gelöscht
+  if [[ "$mode" == "wipe" ]] && ! mountpoint -q "$DATA"; then
+    find "$DATA" -xdev -mindepth 1 -delete
+  fi
+
+  # Einstellungen, Datenbank, Dashboard, Energiesparen … löschen. Die Gesamtbetriebszeit
+  # (history.json) gehört zum Gerät und bleibt – wie ein Betriebsstundenzähler
+  find "$STATE_DIR" -mindepth 1 ! -name history.json -delete
+  install -d -m 0700 -o pinas -g pinas "$STATE_DIR" "$STATE_DIR/updates"
+  rm -rf /var/lib/pinas-update/staged /var/lib/pinas-update/staged.json
+  set_setting PINAS_SHARED_MODE folder
+  PINAS_SHARED_MODE="folder"
+  prepare_dirs "$DATA" folder ext4
+  samba_config || true
+
+  systemctl start smbd pinas || true
+  printf '{"state": "done", "mode": "%s"}\n' "$mode" > "$RESET_STATUS"
+}
+
 # ---------------------------------------------------------------- Befehle
 
 cmd="${1:-}"
@@ -256,6 +390,17 @@ case "$cmd" in
   disk-sleep)
     [[ $# -eq 1 ]] || die "Aufruf: pinas-helper disk-sleep"
     exec /usr/local/sbin/pinas-diskpower --now
+    ;;
+  factory-reset|factory-reset-run)
+    [[ $# -eq 2 ]] || die "Aufruf: pinas-helper $cmd keep|wipe"
+    [[ "$2" == "keep" || "$2" == "wipe" ]] || die "Unbekannter Modus: $2"
+    if [[ "$cmd" == "factory-reset" ]]; then factory_reset "$2"; else factory_reset_run "$2"; fi
+    exit 0
+    ;;
+  power)
+    [[ $# -eq 2 ]] || die "Aufruf: pinas-helper power AKTION"
+    power "$2"
+    exit 0
     ;;
   update-stage)
     [[ $# -eq 2 ]] || die "Aufruf: pinas-helper update-stage DATEI"

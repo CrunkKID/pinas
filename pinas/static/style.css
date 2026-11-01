@@ -370,6 +370,26 @@ select { font: inherit; padding: .55rem .8rem; border: 1px solid var(--border); 
   animation: spin 1s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Werkseinstellungen */
+.reset-form { display: grid; gap: .9rem; border-color: var(--bad); }
+.reset-form p { margin: 0; }
+.reset-wipe { display: flex; gap: .6rem; align-items: flex-start; font-weight: 400; }
+.reset-wipe input { margin-top: .3rem; flex: none; }
+.reset-fields { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.reset-wait h1 { display: flex; align-items: center; justify-content: center; gap: .6rem; }
+.reset-wait p { margin: 0; text-align: center; }
+
+/* Ein/Aus-Knöpfe oben rechts im Dashboard */
+.power-bar { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
+.power-bar + #dash-reset, .power-bar ~ #dash-edit { margin-left: .6rem; }
+.power-pending { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.power-countdown { font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  .power-bar { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  .power-bar form, .power-bar button { width: 100%; }
+  .power-bar ~ #dash-edit { margin-left: 0; }
+}
+
 /* Dashboard anpassen */
 .dash-bar { display: flex; justify-content: flex-end; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .dash-hint { margin: 0 auto 0 0; font-size: .9rem; }

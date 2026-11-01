@@ -1,8 +1,12 @@
 """Dauerhafte Statistik, die Neustarts übersteht: Gesamtbetriebszeit und höchste CPU-Temperatur.
 
 Ein Hintergrund-Thread misst alle 10 Sekunden. Gespeichert wird höchstens einmal pro Minute
-(und sofort bei einem neuen Temperatur-Höchstwert), um die SD-Karte zu schonen. Bei einem
-plötzlichen Stromausfall geht so höchstens eine Minute Betriebszeit verloren.
+(und sofort bei einem neuen Temperatur-Höchstwert), um die SD-Karte zu schonen. Beim Herunterfahren,
+Neustart oder Update (der Dienst wird gestoppt) wird zusätzlich sofort gespeichert – nur bei einem
+plötzlichen Stromausfall kann höchstens eine Minute Betriebszeit fehlen.
+
+Ein Neustart des Dienstes ohne Neustart des Pi (z. B. Update) zählt nichts doppelt: Die Laufzeit kommt
+aus /proc/uptime und gehört zur selben boot_id.
 """
 import json
 import os
@@ -60,6 +64,12 @@ class History:
                 changed = True
             if changed or time.monotonic() - self._saved >= self.SAVE_EVERY:
                 self._save()
+
+    def flush(self) -> None:
+        """Letzten Stand sofort speichern (beim Beenden des Dienstes)."""
+        self.sample()
+        with self.lock:
+            self._save()
 
     def _save(self) -> None:
         tmp = self.path.with_suffix(".tmp")

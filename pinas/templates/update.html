@@ -115,6 +115,28 @@
 </details>
 {% endif %}
 
+<h2 id="werkseinstellungen">Auf Werkseinstellungen zurücksetzen</h2>
+<form method="post" action="{{ url_for('updates.factory_reset') }}" class="card reset-form" id="reset-form"
+      data-confirm="Alle Benutzer, Passwörter und Einstellungen werden gelöscht. Danach muss PiNAS neu eingerichtet werden. Das lässt sich nicht rückgängig machen."
+      data-confirm-title="Wirklich auf Werkseinstellungen zurücksetzen?" data-confirm-ok="Zurücksetzen" data-confirm-danger>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <p>Setzt PiNAS in den Zustand wie nach dem ersten Start zurück: <b>alle Benutzer, Passwörter und Einstellungen</b>
+    (Dashboard, Energiesparen, Festplatten-Namen, Papierkorb-Einstellungen) werden gelöscht,
+    die Festplatte wird abgemeldet. Danach startet die Ersteinrichtung.</p>
+  <p class="muted">Bleibt erhalten: die installierte Version {{ version }}, die Gesamtbetriebszeit und das Zertifikat für die sichere Verbindung.
+    Deine <b>Dateien bleiben auf der Festplatte</b> – nach der Neueinrichtung mit „Verwenden“ und den gleichen
+    Benutzernamen sind sie wieder da.</p>
+  <label class="check reset-wipe"><input type="checkbox" name="wipe" value="1" id="reset-wipe">
+    <span><b>Zusätzlich die Festplatte leeren</b> – alle Dateien werden unwiderruflich gelöscht
+      (z. B. vor dem Verkaufen oder Verschenken). Sie landen <b>nicht</b> im Papierkorb.</span></label>
+  <div class="reset-fields">
+    <label>Dein Passwort<input type="password" name="password" autocomplete="current-password" required></label>
+    <label><span>Zum Bestätigen „<b id="reset-word">zurücksetzen</b>“ eintippen</span>
+      <input name="confirm" id="reset-confirm" autocomplete="off" autocapitalize="none" spellcheck="false" required></label>
+  </div>
+  <div><button class="danger" id="reset-btn" disabled>Auf Werkseinstellungen zurücksetzen</button></div>
+</form>
+
 <details class="card upd-help">
   <summary>So kommst du an ein Update</summary>
   <ol>
@@ -142,6 +164,26 @@
     ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("drag"); }));
     ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove("drag")));
     drop.addEventListener("drop", (e) => { e.preventDefault(); input.files = e.dataTransfer.files; show(); });
+  }
+  // Werkseinstellungen: Knopf erst freigeben, wenn das passende Wort eingetippt ist
+  const resetForm = document.getElementById("reset-form");
+  if (resetForm) {
+    const wipe = document.getElementById("reset-wipe");
+    const word = document.getElementById("reset-word");
+    const confirmInput = document.getElementById("reset-confirm");
+    const btn = document.getElementById("reset-btn");
+    const check = () => {
+      const want = wipe.checked ? "alles löschen" : "zurücksetzen";
+      word.textContent = want;
+      btn.textContent = wipe.checked ? "Zurücksetzen und Festplatte leeren" : "Auf Werkseinstellungen zurücksetzen";
+      btn.disabled = confirmInput.value.trim().toLowerCase() !== want;
+      resetForm.dataset.confirm = wipe.checked
+        ? "Alle Benutzer, Einstellungen UND ALLE DATEIEN auf der Festplatte werden unwiderruflich gelöscht. Das lässt sich nicht rückgängig machen."
+        : "Alle Benutzer, Passwörter und Einstellungen werden gelöscht. Danach muss PiNAS neu eingerichtet werden. Deine Dateien bleiben auf der Festplatte.";
+    };
+    wipe.addEventListener("change", check);
+    confirmInput.addEventListener("input", check);
+    check();
   }
   // Während der Installation den Status abfragen; die Weboberfläche ist zwischendurch kurz weg
   if (document.getElementById("upd-running")) {
