@@ -8,6 +8,9 @@ from . import create_app
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     app = create_app()
+    app.extensions["pinas_history"].start()
+    from .trash import start_purger
+    start_purger(app)
     host, port = app.config["HOST"], app.config["PORT"]
     # Upload-Zwischendateien auf die NAS-Platte statt auf die SD-Karte
     tmp = app.config["DATA_DIR"] / ".tmp"
