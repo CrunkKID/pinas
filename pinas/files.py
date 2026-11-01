@@ -5,10 +5,11 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from flask import (Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template,
-                   request, send_file, url_for)
+from flask import (Blueprint, abort, current_app, flash, g, jsonify, make_response, redirect,
+                   render_template, request, send_file, url_for)
 
 from .auth import login_required
+from .config import TRASH_NAME, storage
 
 bp = Blueprint("files", __name__)
 
@@ -16,14 +17,25 @@ ROOTS = {"privat": "Privat", "gemeinsam": "Gemeinsam"}
 _FORBIDDEN_CHARS = set('/\\\0')
 
 
+def hidden_names(root: str) -> frozenset:
+    """Ordner, die in der obersten Ebene verborgen sind: der Papierkorb und im Modus "root"
+    zusätzlich PiNAS- und Systemordner in „Gemeinsam“."""
+    extra = storage(current_app.config)["hidden"] if root == "gemeinsam" else frozenset()
+    return extra | {TRASH_NAME}
+
+
 def root_dir(root: str) -> Path:
+    paths = storage(current_app.config)
     if root == "privat":
-        base = current_app.config["USERS_DIR"] / g.user["username"]
+        base = paths["users"] / g.user["username"]
     elif root == "gemeinsam":
-        base = current_app.config["SHARED_DIR"]
+        base = paths["shared"]
     else:
         abort(404)
-    base.mkdir(parents=True, exist_ok=True)
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass  # z. B. Platte nur lesend eingebunden
     return base.resolve()
 
 
@@ -33,6 +45,8 @@ def resolve(root: str, sub: str) -> tuple[Path, Path]:
     target = (base / (sub or "").strip("/")).resolve()
     if target != base and base not in target.parents:
         abort(403)
+    if target != base and target.relative_to(base).parts[0] in hidden_names(root):
+        abort(403)  # PiNAS- und Systemordner sind über „Gemeinsam“ nicht erreichbar
     return base, target
 
 
@@ -40,6 +54,14 @@ def clean_name(name: str) -> str:
     name = (name or "").strip()
     if not name or name in (".", "..") or any(c in _FORBIDDEN_CHARS for c in name) or len(name) > 255:
         raise ValueError(f"Ungültiger Name: „{name}“")
+    return name
+
+
+def new_name(root: str, base: Path, parent: Path, name: str) -> str:
+    """Prüft einen neuen Namen; reservierte Ordnernamen sind ganz oben in „Gemeinsam“ tabu."""
+    name = clean_name(name)
+    if parent == base and name in hidden_names(root):
+        raise ValueError(f"Der Name „{name}“ ist hier reserviert.")
     return name
 
 
@@ -73,8 +95,11 @@ def browse(root, sub=""):
         abort(404)
 
     entries = []
+    hidden = hidden_names(root) if target == base else frozenset()
     with os.scandir(target) as it:
         for e in it:
+            if e.name in hidden or e.name.startswith(".pinas-upload-"):
+                continue
             try:
                 st = e.stat()
             except OSError:
@@ -95,20 +120,23 @@ def browse(root, sub=""):
         crumbs.append((part, "/".join(acc)))
 
     usage = shutil.disk_usage(current_app.config["DATA_DIR"])
-    return render_template("files.html", root=root, roots=ROOTS, sub=rel(base, target),
-                           entries=entries, crumbs=crumbs, usage=usage)
+    resp = make_response(render_template("files.html", root=root, roots=ROOTS, sub=rel(base, target),
+                                         entries=entries, crumbs=crumbs, usage=usage))
+    # Ordnerinhalt nie aus dem Browser-Cache anzeigen (sonst fehlen frisch hochgeladene Dateien)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @bp.post("/dateien/<root>/upload")
 @login_required
 def upload(root):
-    _, target = resolve(root, request.form.get("dir", ""))
+    base, target = resolve(root, request.form.get("dir", ""))
     if not target.is_dir():
         return jsonify(error="Zielordner existiert nicht."), 400
     saved, errors = [], []
     for f in request.files.getlist("files"):
         try:
-            name = clean_name(os.path.basename((f.filename or "").replace("\\", "/")))
+            name = new_name(root, base, target, os.path.basename((f.filename or "").replace("\\", "/")))
             dest = unique_path(target / name)
             tmp = target / f".pinas-upload-{uuid.uuid4().hex}"
             try:
@@ -126,9 +154,9 @@ def upload(root):
 @login_required
 def mkdir(root):
     sub = request.form.get("dir", "")
-    _, target = resolve(root, sub)
+    base, target = resolve(root, sub)
     try:
-        (target / clean_name(request.form.get("name", ""))).mkdir()
+        (target / new_name(root, base, target, request.form.get("name", ""))).mkdir()
     except FileExistsError:
         flash("Ein Element mit diesem Namen existiert bereits.", "error")
     except (ValueError, OSError) as exc:
@@ -144,7 +172,7 @@ def rename(root):
     if src == base or not src.exists():
         abort(400)
     try:
-        dest = src.with_name(clean_name(request.form.get("name", "")))
+        dest = src.with_name(new_name(root, base, src.parent, request.form.get("name", "")))
         if dest.exists():
             raise ValueError("Ein Element mit diesem Namen existiert bereits.")
         src.rename(dest)
@@ -160,12 +188,10 @@ def delete(root):
     base, target = resolve(root, request.form.get("path", ""))
     if target == base or not (target.exists() or target.is_symlink()):
         abort(400)
+    from .trash import move_to_trash  # hier importiert, sonst Kreis-Import (trash nutzt files)
     try:
-        if target.is_dir() and not target.is_symlink():
-            shutil.rmtree(target)
-        else:
-            target.unlink()
-        flash(f"„{target.name}“ gelöscht.", "ok")
+        move_to_trash(root, base, target)
+        flash(f"„{target.name}“ in den Papierkorb verschoben.", "ok")
     except OSError as exc:
         flash(f"Löschen fehlgeschlagen: {exc}", "error")
     return back_to(root, sub)
