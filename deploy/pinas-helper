@@ -4,15 +4,25 @@
 #   pinas-helper add-user NAME           (Passwort über stdin)
 #   pinas-helper set-password NAME       (Passwort über stdin)
 #   pinas-helper delete-user NAME
-#   pinas-helper use-disk /dev/sdX format   (Platte löschen, ext4 anlegen, als NAS-Speicher einhängen)
-#   pinas-helper use-disk /dev/sdX1 keep    (vorhandene ext4-Partition einhängen)
+#   pinas-helper use-disk /dev/sdX format [folder|root]   (Platte löschen, ext4 anlegen, einhängen)
+#   pinas-helper use-disk /dev/sdX1 keep [folder|root]    (vorhandene ext4-/NTFS-/exFAT-Partition einhängen)
+#   pinas-helper set-layout folder|root     (Ordner-Aufteilung umstellen, siehe unten)
+#   pinas-helper samba-config               (Samba-Freigaben neu schreiben)
+#   pinas-helper disk-sleep                 (NAS-Platte sofort in den Ruhezustand)
+#
+# Ordner-Aufteilung (PINAS_SHARED_MODE in /etc/default/pinas):
+#   folder  „Gemeinsam“ = DATA/shared,  private Ordner in DATA/users/<name>
+#   root    „Gemeinsam“ = ganze Platte (z. B. vom Windows-PC), private Ordner in DATA/.pinas/users/<name>
 set -euo pipefail
 
 GROUP="nasusers"
 MARK="pinas-managed"
+SETTINGS="/etc/default/pinas"
+SAMBA_TEMPLATE="/usr/local/share/pinas/smb-pinas.conf.in"
 PINAS_DATA="/srv/nas"
-# shellcheck disable=SC1091
-[[ -r /etc/default/pinas ]] && . /etc/default/pinas
+PINAS_SHARED_MODE="folder"
+# shellcheck disable=SC1090
+[[ -r "$SETTINGS" ]] && . "$SETTINGS"
 DATA="$PINAS_DATA"
 
 die() { echo "$*" >&2; exit 1; }
@@ -48,8 +58,85 @@ set_smb_password() {
 
 # ---------------------------------------------------------------- Laufwerk
 
+set_setting() {
+  touch "$SETTINGS"
+  if grep -q "^$1=" "$SETTINGS"; then
+    sed -i "s|^$1=.*|$1=$2|" "$SETTINGS"
+  else
+    echo "$1=$2" >> "$SETTINGS"
+  fi
+}
+
+check_layout() { [[ "$1" == "folder" || "$1" == "root" ]] || die "Unbekannte Ordner-Aufteilung: $1"; }
+users_dir()  { [[ "$1" == "root" ]] && echo "$2/.pinas/users" || echo "$2/users"; }
+shared_dir() { [[ "$1" == "root" ]] && echo "$2" || echo "$2/shared"; }
+
+samba_config() {
+  local veto="/.pinas-upload-*/"
+  # Im Modus "root" PiNAS- und Systemordner in „Gemeinsam“ verbergen
+  [[ "$PINAS_SHARED_MODE" == "root" ]] && veto="$veto.pinas/.tmp/lost+found/System Volume Information/\$RECYCLE.BIN/"
+  # Papierkorb fürs Netzlaufwerk nur, wenn das Samba-Modul "recycle" vorhanden ist –
+  # sonst ließen sich die Freigaben nicht mehr öffnen
+  local recycle='/^@R@/d'
+  if compgen -G "/usr/lib/*/samba/vfs/recycle.so" >/dev/null || compgen -G "/usr/lib/samba/vfs/recycle.so" >/dev/null; then
+    recycle='s/^@R@//'
+  fi
+  sed -e "s|@USERS_DIR@|$(users_dir "$PINAS_SHARED_MODE" "$DATA")|g" \
+      -e "s|@SHARED_DIR@|$(shared_dir "$PINAS_SHARED_MODE" "$DATA")|g" \
+      -e "s|@VETO@|$veto|g" -e "$recycle" "$SAMBA_TEMPLATE" > /etc/samba/pinas.conf
+  testparm -s >/dev/null 2>&1 || die "Samba-Konfiguration fehlerhaft"
+  systemctl try-reload-or-restart smbd 2>/dev/null || true
+}
+
+# Ordner anlegen; Rechte nur auf ext4 setzen (NTFS/exFAT regeln das über die Mount-Optionen)
+prepare_dirs() {
+  local base="$1" layout="$2" fstype="$3" u s
+  u="$(users_dir "$layout" "$base")"
+  s="$(shared_dir "$layout" "$base")"
+  mkdir -p "$u" "$s" "$base/.tmp"
+  if [[ "$fstype" == "ext4" ]]; then
+    chown pinas:pinas "$base" "$base/.tmp" "$s" "$u"
+    if [[ "$layout" == "root" ]]; then chown pinas:pinas "$base/.pinas"; fi
+    chmod 0770 "$base" "$base/.tmp" "$s" "$u"
+  fi
+}
+
+# fstab-Typ und Optionen je Dateisystem; nofail: Der Pi startet auch, wenn die Platte fehlt
+mount_spec() {
+  local common="noatime,nofail,x-systemd.device-timeout=15" ids
+  ids="uid=$(id -u pinas),gid=$(id -g pinas),umask=007"
+  case "$1" in
+    ext4)  echo "ext4 defaults,$common" ;;
+    ntfs)  echo "ntfs-3g defaults,$common,$ids,windows_names" ;;
+    exfat) echo "exfat defaults,$common,$ids" ;;
+    *) die "Dateisystem $1 wird nicht unterstützt" ;;
+  esac
+}
+
+set_layout() {
+  local new="$1" old="$PINAS_SHARED_MODE" old_u new_u fstype
+  check_layout "$new"
+  [[ "$new" == "$old" ]] && { samba_config; return; }
+  old_u="$(users_dir "$old" "$DATA")"
+  new_u="$(users_dir "$new" "$DATA")"
+  fstype="$(findmnt -no FSTYPE -T "$DATA")"
+  [[ "$fstype" == "fuseblk" ]] && fstype="ntfs"
+  # Private Ordner mitnehmen (gleiche Platte: Verschieben dauert keine Sekunde)
+  if [[ -d "$old_u" ]]; then
+    mkdir -p "$(dirname "$new_u")"
+    rmdir "$new_u" 2>/dev/null || true
+    [[ -e "$new_u" ]] && die "Der Ordner $new_u existiert bereits und ist nicht leer"
+    mv "$old_u" "$new_u"
+  fi
+  prepare_dirs "$DATA" "$new" "$fstype"
+  set_setting PINAS_SHARED_MODE "$new"
+  PINAS_SHARED_MODE="$new"
+  samba_config
+}
+
 use_disk() {
-  local dev="$1" mode="$2" part fstype root_disk tmp uuid
+  local dev="$1" mode="$2" layout="${3:-folder}" part fstype root_disk tmp uuid spec mtype mopts
+  check_layout "$layout"
   [[ "$dev" =~ ^/dev/(sd[a-z]+[0-9]*|nvme[0-9]+n[0-9]+(p[0-9]+)?)$ ]] || die "Ungültiges Gerät: $dev"
   [[ -b "$dev" ]] || die "Gerät $dev nicht gefunden"
 
@@ -71,11 +158,15 @@ use_disk() {
       [[ "$dev" =~ [0-9]$ ]] && part="${dev}p1" || part="${dev}1"
       for _ in 1 2 3 4 5; do [[ -b "$part" ]] && break; sleep 1; done
       mkfs.ext4 -q -F -L pinas "$part"
+      fstype="ext4"
       ;;
     keep)
       [[ "$(lsblk -dno TYPE "$dev")" == "part" ]] || die "Bitte eine Partition wählen"
       fstype="$(blkid -s TYPE -o value "$dev" || true)"
-      [[ "$fstype" == "ext4" ]] || die "Nur ext4-Partitionen können übernommen werden (gefunden: ${fstype:-keins})"
+      case "$fstype" in
+        ext4|ntfs|exfat) ;;
+        *) die "Nur ext4-, NTFS- und exFAT-Partitionen können übernommen werden (gefunden: ${fstype:-keins})" ;;
+      esac
       part="$dev"
       ;;
     *) die "Unbekannter Modus: $mode" ;;
@@ -83,17 +174,40 @@ use_disk() {
 
   uuid="$(blkid -s UUID -o value "$part")"
   [[ -n "$uuid" ]] || die "Keine UUID für $part gefunden"
+  spec="$(mount_spec "$fstype")"
+  mtype="${spec%% *}"
+  mopts="${spec#* }"
 
-  # Neue Platte vorbereiten und bisherige Daten (z. B. von der SD-Karte) hinüberkopieren
+  # Neue Platte probeweise einhängen und vorbereiten
   tmp="$(mktemp -d /mnt/pinas-new.XXXXXX)"
-  mount "$part" "$tmp"
-  mkdir -p "$tmp/users" "$tmp/shared" "$tmp/.tmp"
-  for d in users shared; do
-    [[ -d "$DATA/$d" ]] && rsync -a --ignore-existing "$DATA/$d/" "$tmp/$d/"
-  done
-  chown pinas:pinas "$tmp" "$tmp/.tmp"
-  chown -R pinas:pinas "$tmp/users" "$tmp/shared"
-  chmod 0770 "$tmp" "$tmp/users" "$tmp/shared" "$tmp/.tmp"
+  local probe="${mopts//nofail,/}"
+  probe="${probe//x-systemd.device-timeout=15,/}"  # nur für fstab gedacht
+  if ! mount -t "$mtype" -o "$probe" "$part" "$tmp" 2>/dev/null; then
+    rmdir "$tmp"
+    if [[ "$fstype" == "ntfs" ]]; then
+      die "Die Windows-Platte lässt sich nicht beschreiben. Wahrscheinlich wurde sie nicht sauber getrennt oder Windows-Schnellstart ist aktiv. Bitte an einem Windows-PC einstecken, dort „Hardware sicher entfernen“ wählen (oder Schnellstart in den Energieoptionen ausschalten) und erneut versuchen."
+    fi
+    die "Die Partition $part ließ sich nicht einhängen."
+  fi
+  prepare_dirs "$tmp" "$layout" "$fstype"
+  # Liegen die NAS-Daten bisher auf der SD-Karte, werden sie auf die Platte kopiert.
+  # (Beim Wechsel zwischen zwei Platten wird nichts kopiert.)
+  if ! mountpoint -q "$DATA"; then
+    local rs=(-rt --ignore-existing --exclude '.pinas-upload-*')
+    [[ "$fstype" == "ext4" ]] && rs=(-a --ignore-existing --exclude '.pinas-upload-*')
+    local src_u src_s
+    src_u="$(users_dir "$PINAS_SHARED_MODE" "$DATA")"
+    src_s="$(shared_dir "$PINAS_SHARED_MODE" "$DATA")"
+    if [[ -d "$src_u" ]]; then
+      rsync "${rs[@]}" "$src_u/" "$(users_dir "$layout" "$tmp")/"
+    fi
+    if [[ -d "$src_s" && "$src_s" != "$DATA" ]]; then
+      rsync "${rs[@]}" "$src_s/" "$(shared_dir "$layout" "$tmp")/"
+    fi
+    if [[ "$fstype" == "ext4" ]]; then
+      chown -R pinas:pinas "$(users_dir "$layout" "$tmp")" "$(shared_dir "$layout" "$tmp")"
+    fi
+  fi
   umount "$tmp"
   rmdir "$tmp"
 
@@ -103,10 +217,14 @@ use_disk() {
     umount "$DATA" || umount -l "$DATA"
   fi
   sed -i "\|[[:space:]]${DATA}[[:space:]]|d" /etc/fstab
-  # nofail: Der Pi startet auch, wenn die Platte fehlt
-  echo "UUID=$uuid  $DATA  ext4  defaults,noatime,nofail,x-systemd.device-timeout=15  0  2" >> /etc/fstab
+  local pass=0
+  [[ "$fstype" == "ext4" ]] && pass=2
+  echo "UUID=$uuid  $DATA  $mtype  $mopts  0  $pass" >> /etc/fstab
   systemctl daemon-reload
   mount "$DATA"
+  set_setting PINAS_SHARED_MODE "$layout"
+  PINAS_SHARED_MODE="$layout"
+  samba_config
   systemctl start smbd || true
 }
 
@@ -120,9 +238,22 @@ case "$cmd" in
     check_user_name
     ;;
   use-disk)
-    [[ $# -eq 3 ]] || die "Aufruf: pinas-helper use-disk GERÄT format|keep"
-    use_disk "$2" "$3"
+    [[ $# -eq 3 || $# -eq 4 ]] || die "Aufruf: pinas-helper use-disk GERÄT format|keep [folder|root]"
+    use_disk "$2" "$3" "${4:-folder}"
     exit 0
+    ;;
+  set-layout)
+    [[ $# -eq 2 ]] || die "Aufruf: pinas-helper set-layout folder|root"
+    set_layout "$2"
+    exit 0
+    ;;
+  samba-config)
+    samba_config
+    exit 0
+    ;;
+  disk-sleep)
+    [[ $# -eq 1 ]] || die "Aufruf: pinas-helper disk-sleep"
+    exec /usr/local/sbin/pinas-diskpower --now
     ;;
   *)
     die "Unbekannter Befehl: $cmd" ;;
