@@ -1,0 +1,76 @@
+# Baut die Android-App (APK) – Ordner android/.
+# - Manuell starten: Reiter "Actions" → "PiNAS-App bauen" → "Run workflow"
+#   → ZIP unter "Artifacts" herunterladen, entpacken und die APK aufs Handy kopieren
+# - Tag pushen (z. B. app-v0.1.0): APK wird zusätzlich an das GitHub-Release angehängt
+# Signatur: Secrets PINAS_KEYSTORE_BASE64 (Keystore als Base64) und PINAS_KEYSTORE_PASSWORD.
+# Ohne sie wird mit einem Debug-Schlüssel signiert, dann lässt sich eine neue Version nur nach
+# Deinstallieren der alten aufspielen.
+name: PiNAS-App bauen
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["app-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Signierschlüssel bereitstellen
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PINAS_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.PINAS_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/pinas.p12"
+            # Name des Schlüssels im Keystore (unter Windows erzeugt: „pinas“) – sicherheitshalber auslesen
+            ALIAS="$(keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/pinas.p12" -storepass "$KEYSTORE_PASSWORD" \
+              | grep -i PrivateKeyEntry | head -n1 | cut -d, -f1)"
+            echo "Schlüssel: $ALIAS"
+            {
+              echo "PINAS_KEYSTORE_FILE=$RUNNER_TEMP/pinas.p12"
+              echo "PINAS_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+              echo "PINAS_KEY_PASSWORD=$KEYSTORE_PASSWORD"
+              echo "PINAS_KEY_ALIAS=$ALIAS"
+            } >> "$GITHUB_ENV"
+          else
+            echo "::warning::Kein Signierschlüssel hinterlegt – APK wird mit Debug-Schlüssel signiert."
+          fi
+
+      - name: APK bauen
+        id: apk
+        run: |
+          gradle -p android --no-daemon assembleRelease
+          VERSION="$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' android/app/build.gradle.kts)"
+          cp android/app/build/outputs/apk/release/app-release.apk "PiNAS-App-$VERSION.apk"
+          echo "file=PiNAS-App-$VERSION.apk" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Als Artifact hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: PiNAS-App-${{ steps.apk.outputs.version }}
+          path: ${{ steps.apk.outputs.file }}
+
+      - name: Am Release anhängen
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.file }}
+          # „Nach Updates suchen“ im NAS liest das neueste Release – das muss ein PiNAS-Update bleiben
+          make_latest: "false"
