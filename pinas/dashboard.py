@@ -136,6 +136,76 @@ def disk_io() -> dict | None:
     return None
 
 
+# ---------------------------------------------------------------- Energieverbrauch
+
+# Raspberry Pi: Der Stromchip (PMIC) misst Spannung und Strom seiner Versorgungsschienen. Was er nicht
+# sieht (Netzwerk-/USB-Chip, Spannungswandler), kommt als pauschaler Grundverbrauch dazu.
+PI_BOARD_OVERHEAD = 0.6  # Watt
+# USB-Festplatte: Der Pi misst den Strom am USB-Anschluss nicht – typische Werte je Zustand.
+DISK_WATTS = {
+    "hdd": {"active": 2.5, "idle": 1.6, "standby": 0.3},
+    "ssd": {"active": 1.5, "idle": 0.4, "standby": 0.4},
+}
+PRICE_PER_KWH = 0.35  # Euro, nur für die grobe Monatsrechnung
+
+_disk_prev: dict = {}
+
+
+def pi_power() -> float | None:
+    """Leistung des Raspberry Pi in Watt (Summe der PMIC-Schienen + Grundverbrauch)."""
+    out = _cmd("vcgencmd", "pmic_read_adc")
+    if not out:
+        return None
+    amps, volts = {}, {}
+    for line in out.splitlines():
+        # z. B. "VDD_CORE_A current(7)=2.12345000A" und "VDD_CORE_V volt(15)=0.81234000V"
+        name, _, value = line.strip().partition("=")
+        rail = name.split(" ")[0]
+        try:
+            number = float(value.rstrip("AV"))
+        except ValueError:
+            continue
+        if rail.endswith("_A"):
+            amps[rail[:-2]] = number
+        elif rail.endswith("_V"):
+            volts[rail[:-2]] = number
+    watts = sum(volts[r] * amps[r] for r in amps if r in volts)
+    return round(watts + PI_BOARD_OVERHEAD, 2) if watts > 0 else None
+
+
+def disk_power(io: dict | None) -> dict | None:
+    """Geschätzte Leistung der USB-Festplatte aus Plattentyp und Zustand (aktiv/bereit/Ruhezustand)."""
+    if (RUN_DIR / "disk-off").exists():
+        return {"watts": 0.0, "state": "ausgeschaltet", "kind": ""}
+    if not io or not io["device"].startswith("sd"):
+        return None  # keine USB-Platte (Daten auf der SD-Karte)
+    disk = io["device"].rstrip("0123456789")
+    kind = "hdd" if _read(f"/sys/block/{disk}/queue/rotational") == "1" else "ssd"
+    try:
+        asleep = json.loads(_read("/run/pinas-diskpower.json") or "{}").get("asleep", False)
+    except ValueError:
+        asleep = False
+    # Aktiv, wenn seit der letzten Messung gelesen oder geschrieben wurde
+    now, sectors = time.monotonic(), io["read"] + io["written"]
+    prev = _disk_prev.get(disk)
+    _disk_prev[disk] = (now, sectors)
+    busy = bool(prev) and sectors > prev[1] and now - prev[0] < 120
+    state = "standby" if asleep and not busy else ("active" if busy else "idle")
+    labels = {"active": "arbeitet", "idle": "bereit", "standby": "Ruhezustand"}
+    return {"watts": DISK_WATTS[kind][state], "state": labels[state], "kind": kind.upper()}
+
+
+def energy(io: dict | None) -> dict | None:
+    pi = pi_power()
+    disk = disk_power(io)
+    if pi is None and disk is None:
+        return None
+    total = (pi or 0) + (disk["watts"] if disk else 0)
+    kwh_month = total * 24 * 30 / 1000
+    return {"pi": pi, "disk": disk, "total": round(total, 1),
+            "kwh_month": round(kwh_month, 1), "euro_month": round(kwh_month * PRICE_PER_KWH, 2)}
+
+
 def net_bytes() -> dict | None:
     """Seit dem Einschalten empfangene/gesendete Bytes aller Netzwerkschnittstellen (ohne lo)."""
     raw = _read("/proc/net/dev")
@@ -259,6 +329,7 @@ def stats() -> dict:
     data_dir = current_app.config["DATA_DIR"]
     du = shutil.disk_usage(data_dir)
     load = os.getloadavg() if hasattr(os, "getloadavg") else None
+    io = disk_io()
     return {
         "temp": cpu_temp(),
         "load": [round(x, 2) for x in load] if load else None,
@@ -267,7 +338,8 @@ def stats() -> dict:
         "memory": memory(),
         "uptime": uptime(),
         "history": history(),
-        "io": disk_io(),
+        "io": io,
+        "energy": energy(io),
         "net": net_bytes(),
         "throttled": throttled(),
         "disk": {"total": du.total, "used": du.used, "free": du.free, "path": str(data_dir),
@@ -317,7 +389,7 @@ def power(action):
 
 
 # Kacheln und Bereiche des Dashboards in der Standard-Reihenfolge
-TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "services", "devices"]
+TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "power", "services", "devices"]
 
 
 def layout() -> dict:

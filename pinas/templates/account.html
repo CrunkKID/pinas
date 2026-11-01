@@ -16,6 +16,17 @@
 </div>
 
 <div class="card">
+  <h2>Dein Speicherplatz</h2>
+  {% if space.limit %}
+  <div class="bar{{ ' full' if space.pct >= 90 }}"><span style="width: {{ space.pct|round(1) }}%"></span></div>
+  <p>{{ space.used|filesize }} von <b>{{ space.limit|filesize }}</b> belegt – noch {{ space.free|filesize }} frei.</p>
+  <p class="muted">Gilt für deinen Ordner „Privat“ (inklusive Papierkorb). Mehr Platz kann dir der Administrator geben.</p>
+  {% else %}
+  <p>{{ space.used|filesize }} in „Privat“ belegt – <b>ohne Begrenzung</b>.</p>
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>Sichere Verbindung</h2>
   <p>Warnt dein Browser oder blockiert er Downloads? Installiere einmal pro Gerät das PiNAS-Zertifikat.</p>
   <a class="button" href="{{ url_for('tls.index') }}">Anleitung &amp; Zertifikat</a>

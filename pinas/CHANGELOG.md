@@ -2,6 +2,17 @@
 
 Neueste Version oben. Das Update-Center zeigt die Abschnitte an, die neuer sind als die installierte Version.
 
+## 1.2.3
+- Update-Center: Vor jeder Installation wird geprüft, ob genug Speicherplatz frei ist, ob neue Programmpakete nötig sind und ob dafür Internet da ist – erst dann lässt sich installieren
+- Update-Center: Vor der Installation wird angezeigt, wie lange sie ungefähr dauert; PiNAS merkt sich die Dauer jedes Updates und schätzt beim nächsten Mal genauer
+- Update-Center: Während der Installation zeigt ein Fortschrittsbalken, wie lange es noch dauert
+- Nach einer erfolgreichen Installation startet PiNAS nach 15 Sekunden automatisch neu – mit Countdown; danach lädt die Seite von selbst neu
+- Updates laden Programmpakete nur noch aus dem Internet, wenn wirklich etwas fehlt – dadurch schneller und auch ohne Internet möglich
+- Benutzer verwalten: Nur der Administrator kann jedem Benutzer einen eigenen Speicherplatz für „Privat“ freigeben (leer = unbegrenzt)
+- Speicherplatz: Ist er voll, werden Uploads abgelehnt; das Netzlaufwerk zeigt den persönlichen Platz als Laufwerksgröße an
+- Speicherplatz: Jeder Benutzer sieht seinen Platz unter „Dateien“ und „Konto“
+- Dashboard: Neue Kachel „Energieverbrauch“ – wie viel Watt der Raspberry Pi, die Festplatte und das PiNAS insgesamt ziehen, dazu kWh und Kosten pro Monat
+
 ## 1.2.2
 - Reparatur: Nach dem Update auf 1.2.1 startete die Weboberfläche nicht mehr („502 Bad Gateway“), weil die neuen Programmdateien falsche Zugriffsrechte bekamen – das ist behoben
 - Update-Center: Nach jeder Installation wird geprüft, ob die Weboberfläche wirklich startet; wenn nicht, wird automatisch die vorherige Version wiederhergestellt

@@ -1,0 +1,50 @@
+#!/usr/bin/python3 -I
+"""Samba "dfree command" für die Freigabe „Privat“: meldet Windows/macOS das persönliche
+Speicherlimit als Laufwerksgröße (Grenzen aus /var/lib/pinas/quotas.json, vom Admin gesetzt).
+Ohne Limit wird der echte Platz der Festplatte gemeldet. Ausgabe: Gesamt und Frei in 1-KB-Blöcken.
+"""
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+QUOTAS = Path("/var/lib/pinas/quotas.json")
+
+
+def user_dir(path: Path) -> Path | None:
+    """Privater Ordner, in dem der Pfad liegt: …/users/<name>/…"""
+    for p in [path, *path.parents]:
+        if p.parent.name == "users":
+            return p
+    return None
+
+
+def dir_size(path: Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def main() -> None:
+    path = Path(os.path.realpath(sys.argv[1] if len(sys.argv) > 1 else "."))
+    disk = shutil.disk_usage(path)
+    total, free = disk.total, disk.free
+    home = user_dir(path)
+    try:
+        limit = int(json.loads(QUOTAS.read_text()).get(home.name, 0)) if home else 0
+    except (OSError, ValueError, TypeError):
+        limit = 0
+    if limit > 0:
+        total = limit
+        free = min(disk.free, max(0, limit - dir_size(home)))
+    print(f"{total // 1024} {free // 1024}")
+
+
+if __name__ == "__main__":
+    main()

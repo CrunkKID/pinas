@@ -14,8 +14,8 @@
     {% endfor %}
   </div>
   <div class="usage" id="usage" title="{{ usage.used|filesize }} von {{ usage.total|filesize }} belegt">
-    <div class="bar"><span style="width: {{ (usage.used / usage.total * 100)|round(1) if usage.total else 0 }}%"></span></div>
-    <small>{{ usage.free|filesize }} frei</small>
+    <div class="bar"><span style="width: {{ [(usage.used / usage.total * 100), 100]|min|round(1) if usage.total else 0 }}%"></span></div>
+    <small>{% if quota_free is not none %}Dein Speicher: {{ usage.free|filesize }} von {{ usage.total|filesize }} frei{% else %}{{ usage.free|filesize }} frei{% endif %}</small>
   </div>
 </div>
 
@@ -78,7 +78,7 @@
   </symbol>
 </svg>
 
-<div id="dropzone" class="dropzone" data-view="details" data-upload="{{ url_for('files.upload', root=root) }}" data-dir="{{ sub }}">
+<div id="dropzone" class="dropzone" data-view="details" data-upload="{{ url_for('files.upload', root=root) }}" data-dir="{{ sub }}"{% if quota_free is not none %} data-quota-free="{{ quota_free }}"{% endif %}>
   <div id="progress" class="progress" hidden><span></span><small></small></div>
   <div id="listing">
   {% if entries %}

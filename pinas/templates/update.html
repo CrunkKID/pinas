@@ -41,10 +41,17 @@
 </div>
 
 {% if st.state == 'running' %}
-<div class="card upd-running" id="upd-running">
+<div class="card upd-running" id="upd-running" data-start="{{ st.time }}" data-estimate="{{ staged.estimate or 90 }}">
   <h2><span class="spinner"></span> Update wird installiert …</h2>
-  <p>Das dauert meist 2–5 Minuten. Die Weboberfläche startet dabei neu und ist kurz nicht erreichbar –
-    diese Seite lädt sich danach von selbst neu. <b>Bitte den Pi jetzt nicht ausschalten.</b></p>
+  <div class="bar upd-progress"><span id="upd-bar" style="width: 2%"></span></div>
+  <p class="upd-eta" id="upd-eta">Geschätzte Dauer: ca. {{ ((staged.estimate or 90) / 60)|round(0, 'ceil')|int }} Min.</p>
+  <p>Danach startet PiNAS automatisch neu. Die Weboberfläche ist dabei kurz nicht erreichbar –
+    diese Seite lädt sich von selbst neu. <b>Bitte den Pi jetzt nicht ausschalten.</b></p>
+</div>
+{% elif st.state == 'done' and reboot_at %}
+<div class="card upd-running" id="upd-reboot" data-at="{{ reboot_at }}">
+  <h2>✓ Update erfolgreich – <span id="upd-reboot-text">Neustart in <b id="upd-reboot-s">15</b> Sekunden</span></h2>
+  <p>{{ st.message }} Nach dem Neustart (ca. 1 Minute) lädt diese Seite von selbst neu.</p>
 </div>
 {% elif st.state == 'done' %}
 <div class="flash ok">✓ {{ st.message }}</div>
@@ -65,14 +72,29 @@
     {% endfor %}
   </div>
   {% endif %}
+  <div class="upd-check">
+    <h3>Prüfung vor der Installation</h3>
+    {% if staged.checks %}
+    <ul>
+      {% for c in staged.checks %}
+      <li class="{{ 'ok' if c.ok else 'bad' }}"><span class="dot {{ 'ok' if c.ok else 'bad' }}"></span><b>{{ c.label }}:</b> {{ c.text }}</li>
+      {% endfor %}
+    </ul>
+    <p class="upd-estimate">⏱ Geschätzte Dauer: <b>ca. {{ (staged.estimate / 60)|round(0, 'ceil')|int }} {{ 'Minute' if staged.estimate <= 60 else 'Minuten' }}</b>
+      <span class="muted">({{ 'aus den letzten Updates gemessen' if staged.estimate_from_history else 'Erfahrungswert' }}),
+      danach Neustart nach {{ staged.reboot_delay }} Sekunden (ca. 1 Minute)</span></p>
+    {% else %}
+    <p class="muted">⏱ Geschätzte Dauer: ca. 2 Minuten, danach startet PiNAS automatisch neu (ca. 1 Minute).</p>
+    {% endif %}
+  </div>
   <p class="muted upd-sha">Prüfsumme der Datei (SHA-256): <code>{{ staged.sha256 }}</code><br>
     Bei einer ZIP von GitHub steht dieselbe Zahl dort unter „Artifacts“ als „Digest“.</p>
   <div class="upd-row">
     <form method="post" action="{{ url_for('updates.action', action='installieren') }}" class="inline"
-          data-confirm="PiNAS wird auf Version {{ staged.version }} aktualisiert. Die Weboberfläche und das Netzlaufwerk sind dabei ein paar Minuten nicht erreichbar. Laufende Kopiervorgänge vorher beenden."
+          data-confirm="PiNAS wird auf Version {{ staged.version }} aktualisiert (ca. {{ ((staged.estimate or 120) / 60)|round(0, 'ceil')|int }} Min.) und startet danach automatisch neu. Weboberfläche und Netzlaufwerk sind dabei ein paar Minuten nicht erreichbar. Laufende Kopiervorgänge vorher beenden."
           data-confirm-title="Update installieren?" data-confirm-ok="Jetzt installieren">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="primary">Jetzt installieren</button>
+      <button class="primary"{% if staged.ready is false %} disabled title="Die Prüfung ist nicht bestanden"{% endif %}>Jetzt installieren</button>
     </form>
     <form method="post" action="{{ url_for('updates.action', action='verwerfen') }}" class="inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -186,7 +208,44 @@
     check();
   }
   // Während der Installation den Status abfragen; die Weboberfläche ist zwischendurch kurz weg
-  if (document.getElementById("upd-running")) {
+  const running = document.getElementById("upd-running");
+  if (running) {
+    // Fortschritt aus der geschätzten Dauer (bleibt bei 95 %, bis die Installation wirklich fertig ist)
+    const start = +running.dataset.start, estimate = +running.dataset.estimate;
+    const tick = () => {
+      const elapsed = Math.max(0, Date.now() / 1000 - start);
+      document.getElementById("upd-bar").style.width = Math.min(95, 2 + (elapsed / estimate) * 93) + "%";
+      const left = Math.round(estimate - elapsed);
+      document.getElementById("upd-eta").textContent = left > 60 ? `Noch ca. ${Math.ceil(left / 60)} Minuten`
+        : left > 0 ? `Noch ca. ${left} Sekunden` : "Gleich fertig …";
+      setTimeout(tick, 1000);
+    };
+    tick();
+  }
+  // Nach dem Update: Countdown bis zum Neustart, dann warten, bis PiNAS wieder da ist
+  const reboot = document.getElementById("upd-reboot");
+  if (reboot) {
+    const at = +reboot.dataset.at;
+    const tick = async () => {
+      const left = Math.round(at - Date.now() / 1000);
+      if (left > 0) {
+        document.getElementById("upd-reboot-s").textContent = left;
+        setTimeout(tick, 1000);
+        return;
+      }
+      document.getElementById("upd-reboot-text").textContent = "PiNAS startet neu …";
+      // Erst nach dem Neustart wieder fragen (vorher antwortet noch der alte Dienst)
+      if (Date.now() / 1000 > at + 25) {
+        try {
+          const r = await fetch("{{ url_for('updates.api_status') }}", { cache: "no-store", credentials: "same-origin" });
+          if (r.ok) { location.reload(); return; }
+        } catch {}
+      }
+      setTimeout(tick, 4000);
+    };
+    tick();
+  }
+  if (running) {
     const poll = async () => {
       try {
         const r = await fetch("{{ url_for('updates.api_status') }}", { cache: "no-store", credentials: "same-origin" });

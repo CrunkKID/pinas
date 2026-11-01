@@ -10,12 +10,28 @@
 
 <div class="card">
   <table class="list">
-    <thead><tr><th>Name</th><th>Rolle</th><th class="hide-sm">Angelegt</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Rolle</th><th>Speicherplatz (Privat)</th><th class="hide-sm">Angelegt</th><th></th></tr></thead>
     <tbody>
     {% for u in users %}
+      {% set q = space[u.username] %}
       <tr>
         <td>{{ u.username }}</td>
         <td>{{ 'Admin' if u.is_admin else 'Benutzer' }}</td>
+        <td class="quota-cell">
+          {% if q.limit %}
+          <div class="bar{{ ' full' if q.pct >= 90 }}"><span style="width: {{ q.pct|round(1) }}%"></span></div>
+          <small>{{ q.used|filesize }} von <b>{{ q.limit|filesize }}</b></small>
+          {% else %}
+          <small>{{ q.used|filesize }} belegt · <b>unbegrenzt</b></small>
+          {% endif %}
+          <form method="post" action="{{ url_for('admin.space', username=u.username) }}" class="quota-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input name="gb" inputmode="decimal" list="quota-presets" placeholder="unbegrenzt"
+                   value="{{ ('%g'|format(q.limit / 1024**3)) if q.limit else '' }}" aria-label="Speicherplatz in GB für {{ u.username }}">
+            <span class="muted">GB</span>
+            <button class="btn-sm">Festlegen</button>
+          </form>
+        </td>
         <td class="hide-sm muted">{{ u.created_at[:10] }}</td>
         <td class="actions">
           <form method="post" action="{{ url_for('admin.password', username=u.username) }}" class="inline pw-form">
@@ -36,6 +52,13 @@
     {% endfor %}
     </tbody>
   </table>
+  <datalist id="quota-presets">
+    {% for gb in [10, 25, 50, 100, 250, 500, 1000, 2000] %}<option value="{{ gb }}">{{ gb }} GB</option>{% endfor %}
+  </datalist>
+  <p class="muted quota-note">Speicherplatz: Nur du als Administrator legst fest, wie viel jeder Benutzer in seinem Ordner
+    „Privat“ belegen darf (Feld leer lassen = unbegrenzt). Mitgezählt wird auch sein Papierkorb. Ist das Limit erreicht,
+    lehnt die Weboberfläche weitere Uploads ab und das Netzlaufwerk meldet ein volles Laufwerk.
+    „Gemeinsam“ zählt nicht mit.</p>
 </div>
 
 <h2>Neuer Benutzer</h2>

@@ -32,6 +32,13 @@
     return h ? `${h} Std ${m} Min` : `${m}:${String(s).padStart(2, "0")} Min`;
   }
 
+  function formatSize(bytes) {
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let i = 0;
+    while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+    return i === 0 ? `${bytes} B` : `${bytes.toFixed(1).replace(".", ",")} ${units[i]}`;
+  }
+
   function showStatus(text, done) {
     clearTimeout(hideTimer);
     progress.hidden = false;
@@ -42,6 +49,17 @@
   function upload(files) {
     if (!files.length) return;
     const count = files.length;
+    // Persönliches Speicherlimit schon vor dem Senden prüfen (der Server prüft trotzdem)
+    const quotaFree = zone.dataset.quotaFree;
+    if (quotaFree !== undefined) {
+      const needed = [...files].reduce((sum, f) => sum + f.size, 0);
+      if (needed > +quotaFree) {
+        showStatus(`Nicht genug Speicherplatz: ${formatSize(needed)} gewählt, frei sind noch `
+          + `${formatSize(+quotaFree)}. Bitte Dateien löschen oder den Administrator um mehr Platz bitten.`, true);
+        input.value = "";
+        return;
+      }
+    }
     const data = new FormData();
     data.append("dir", zone.dataset.dir);
     for (const f of files) data.append("files", f, f.name);

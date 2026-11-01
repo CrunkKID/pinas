@@ -13,6 +13,16 @@
       if (!r.ok) return;
       const s = await r.json();
       if (s.temp != null) set("temp", `${s.temp.toFixed(1).replace(".", ",")} °C`);
+      if (s.energy) {
+        const w = (x) => `${x.toFixed(1).replace(".", ",")} W`;
+        const e = s.energy;
+        set("energy-total", w(e.total));
+        set("energy-total2", w(e.total));
+        set("energy-pi", e.pi != null ? w(e.pi) : "–");
+        set("energy-disk", e.disk ? `ca. ${w(e.disk.watts)}` : "keine");
+        set("energy-disk-state", e.disk ? `(${e.disk.kind ? e.disk.kind + ", " : ""}${e.disk.state})` : "");
+        set("energy-month", `${e.kwh_month.toFixed(1).replace(".", ",")} kWh · ${e.euro_month.toFixed(2).replace(".", ",")} €`);
+      }
       if (s.cpu) {
         set("cpu-pct", `${s.cpu.pct} %`);
         set("cpu-text", s.cpu.text);

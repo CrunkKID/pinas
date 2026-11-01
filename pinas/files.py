@@ -4,10 +4,12 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from flask import (Blueprint, abort, current_app, flash, g, jsonify, make_response, redirect,
                    render_template, request, send_file, url_for)
 
+from . import quota
 from .auth import login_required
 from .config import TRASH_NAME, storage
 
@@ -153,8 +155,14 @@ def browse(root, sub=""):
         crumbs.append((part, "/".join(acc)))
 
     usage = shutil.disk_usage(current_app.config["DATA_DIR"])
+    space = quota.info(g.user["username"]) if root == "privat" else None
+    if space and space["limit"]:
+        # Mit Speicherlimit zeigt „Privat“ den persönlichen Platz statt der ganzen Platte
+        usage = SimpleNamespace(total=space["limit"], used=space["used"],
+                                free=min(space["free"], usage.free))
     resp = make_response(render_template("files.html", root=root, roots=ROOTS, sub=rel(base, target),
-                                         entries=entries, crumbs=crumbs, usage=usage))
+                                         entries=entries, crumbs=crumbs, usage=usage,
+                                         quota_free=usage.free if space and space["limit"] else None))
     # Ordnerinhalt nie aus dem Browser-Cache anzeigen (sonst fehlen frisch hochgeladene Dateien)
     resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -166,6 +174,13 @@ def upload(root):
     base, target = resolve(root, request.form.get("dir", ""))
     if not target.is_dir():
         return jsonify(error="Zielordner existiert nicht."), 400
+    if root == "privat":
+        space = quota.info(g.user["username"])
+        if space["limit"] and quota.used(g.user["username"], fresh=True) + (request.content_length or 0) > space["limit"]:
+            free = current_app.jinja_env.filters["filesize"](space["free"])
+            return jsonify(errors=[f"Dein Speicherplatz reicht dafür nicht – frei sind noch {free}. "
+                                   "Lösche Dateien (auch im Papierkorb) oder bitte den Administrator um mehr Platz."]), 413
+        quota.forget(g.user["username"])
     saved, errors = [], []
     for f in request.files.getlist("files"):
         try:

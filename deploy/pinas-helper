@@ -11,7 +11,7 @@
 #   pinas-helper disk-sleep                 (NAS-Platte sofort in den Ruhezustand)
 #   pinas-helper update-stage DATEI         (Update-Paket prüfen und bereitlegen, siehe pinas-update)
 #   pinas-helper update-apply|update-rollback|update-discard
-#   pinas-helper power shutdown|reboot|safe-shutdown|disk-off|disk-on|cancel
+#   pinas-helper power shutdown|reboot|update-reboot|safe-shutdown|disk-off|disk-on|cancel
 #   pinas-helper factory-reset keep|wipe    (Werkseinstellungen; wipe leert zusätzlich die Festplatte)
 #
 # Ordner-Aufteilung (PINAS_SHARED_MODE in /etc/default/pinas):
@@ -290,6 +290,7 @@ power() {
   case "$1" in
     shutdown)      schedule_power poweroff 5 shutdown ;;
     reboot)        schedule_power reboot 5 reboot ;;
+    update-reboot) schedule_power reboot 15 update-reboot ;;  # nach einem erfolgreichen Update
     safe-shutdown) disk_off; schedule_power poweroff "$SAFE_DELAY" safe-shutdown ;;
     disk-off)      disk_off ;;
     disk-on)       disk_on ;;

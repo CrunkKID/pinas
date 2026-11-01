@@ -1,0 +1,21 @@
+# Programmpakete, die PiNAS braucht (eine Zeile pro Paket).
+# Mit "?" davor: optional – fehlt das Paket in der Debian-Version, wird es übersprungen.
+# setup-system.sh installiert nur, was fehlt; das Update-Center schätzt damit die Dauer.
+samba
+python3
+python3-flask
+python3-waitress
+rsync
+sudo
+hdparm
+sdparm
+# Platten vom Windows-PC ohne Formatieren verwenden
+ntfs-3g
+exfatprogs
+# Verschlüsselte Weboberfläche
+nginx
+openssl
+# Samba-Modul "recycle" für den Papierkorb beim Netzlaufwerk (je nach Debian-Version schon in samba enthalten)
+?samba-vfs-modules
+# Damit das NAS in der Windows-Netzwerkumgebung auftaucht
+?wsdd

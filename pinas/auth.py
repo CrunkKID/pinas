@@ -165,4 +165,5 @@ def account():
                 return redirect(url_for("auth.account"))
             except users.UserError as exc:
                 flash(str(exc), "error")
-    return render_template("account.html")
+    from .quota import info
+    return render_template("account.html", space=info(g.user["username"]))

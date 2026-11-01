@@ -22,6 +22,8 @@ def main() -> None:
     signal.signal(signal.SIGTERM, stop)
     from .trash import start_purger
     start_purger(app)
+    from .updates import start_reboot_watch
+    start_reboot_watch(app)
     host, port = app.config["HOST"], app.config["PORT"]
     # Upload-Zwischendateien auf die NAS-Platte statt auf die SD-Karte
     tmp = app.config["DATA_DIR"] / ".tmp"

@@ -26,15 +26,27 @@ DATA="$PINAS_DATA"
 
 echo "==> Pakete"
 export DEBIAN_FRONTEND=noninteractive
-# Ohne Internet weitermachen: Sind alle Pakete schon da, klappt ein Update im Update-Center trotzdem
-apt-get update || echo "Paketlisten konnten nicht aktualisiert werden – fahre mit den vorhandenen fort"
-# ntfs-3g/exfatprogs: Platten vom Windows-PC ohne Formatieren verwenden
-apt-get install -y samba python3 python3-flask python3-waitress rsync sudo hdparm sdparm ntfs-3g exfatprogs \
-  nginx openssl
-# Samba-Modul "recycle" für den Papierkorb beim Netzlaufwerk (je nach Debian-Version schon in samba enthalten)
-apt-get install -y samba-vfs-modules || echo "samba-vfs-modules nicht verfügbar – übersprungen"
-# Damit das NAS in der Windows-Netzwerkumgebung auftaucht (optional)
-apt-get install -y wsdd || echo "wsdd nicht verfügbar – übersprungen"
+# Paketliste aus deploy/packages.txt; "?" = optional
+REQUIRED=()
+OPTIONAL=()
+while read -r p; do
+  [[ -z "$p" || "$p" == \#* ]] && continue
+  if [[ "$p" == \?* ]]; then OPTIONAL+=("${p#\?}"); else REQUIRED+=("$p"); fi
+done < "$SRC/deploy/packages.txt"
+installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"; }
+MISSING=()
+for p in "${REQUIRED[@]}"; do installed "$p" || MISSING+=("$p"); done
+# Optionale Pakete nur, wenn die Debian-Version sie überhaupt kennt
+for p in "${OPTIONAL[@]}"; do installed "$p" || ! apt-cache show "$p" &>/dev/null || MISSING+=("$p"); done
+if (( ${#MISSING[@]} )); then
+  echo "Fehlende Pakete: ${MISSING[*]}"
+  apt-get update || echo "Paketlisten konnten nicht aktualisiert werden – fahre mit den vorhandenen fort"
+  apt-get install -y "${REQUIRED[@]}"
+  for p in "${OPTIONAL[@]}"; do apt-get install -y "$p" || echo "$p nicht verfügbar – übersprungen"; done
+else
+  # Kein Download nötig: Updates gehen so schnell und auch ohne Internet
+  echo "Alle Pakete sind vorhanden."
+fi
 
 echo "==> Benutzer und Gruppen"
 getent group nasusers >/dev/null || groupadd --system nasusers
@@ -73,6 +85,8 @@ chmod -R u=rwX,go=rX "$APP"
 echo "==> Hilfsskript und sudo-Regel"
 install -m 0755 -o root -g root "$SRC/deploy/pinas-helper" /usr/local/sbin/pinas-helper
 install -m 0755 -o root -g root "$SRC/deploy/pinas-update" /usr/local/sbin/pinas-update
+# Speicherlimit pro Benutzer fürs Netzlaufwerk (Samba "dfree command")
+install -m 0755 -o root -g root "$SRC/deploy/pinas-dfree" /usr/local/sbin/pinas-dfree
 echo "pinas ALL=(root) NOPASSWD: /usr/local/sbin/pinas-helper" > /etc/sudoers.d/pinas
 chmod 0440 /etc/sudoers.d/pinas
 visudo -cf /etc/sudoers.d/pinas >/dev/null

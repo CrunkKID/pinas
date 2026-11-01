@@ -18,6 +18,8 @@ import json
 import os
 import re
 import shutil
+import socket
+import statistics
 import subprocess
 import sys
 import tarfile
@@ -38,6 +40,9 @@ INSTALLED = Path("/usr/local/share/pinas/src")  # Quellen der installierten Vers
 UPLOADS = Path("/var/lib/pinas/updates")     # hier legt die Weboberfläche hochgeladene Pakete ab
 MAX_SIZE = 50 * 1024 * 1024
 UNIT = "pinas-update-run"
+DURATIONS = UPD / "durations.json"           # Dauer der letzten Installationen (für die Schätzung)
+REBOOT_DELAY = 15                            # Sekunden bis zum Neustart nach erfolgreicher Installation
+MIN_FREE = 300 * 1024 * 1024                 # freier Platz auf der SD-Karte, den ein Update braucht
 
 
 class UpdateError(Exception):
@@ -77,6 +82,64 @@ def notes_since(changelog: str, current: str) -> list:
         elif section is not None and line.startswith("- "):
             section["items"].append(line[2:].strip())
     return out
+
+
+def missing_packages(src: Path) -> list:
+    """Pakete aus deploy/packages.txt, die noch installiert werden müssten (wie setup-system.sh)."""
+    try:
+        lines = (src / "deploy" / "packages.txt").read_text().splitlines()
+    except OSError:
+        return []
+    missing = []
+    for line in (l.strip() for l in lines):
+        if not line or line.startswith("#"):
+            continue
+        optional, name = line.startswith("?"), line.lstrip("?")
+        res = subprocess.run(["dpkg-query", "-W", "-f=${Status}", name], capture_output=True, text=True)
+        if "install ok installed" in res.stdout:
+            continue
+        if optional and subprocess.run(["apt-cache", "show", name], capture_output=True).returncode != 0:
+            continue
+        missing.append(name)
+    return missing
+
+
+def internet_ok() -> bool:
+    try:
+        socket.create_connection(("deb.debian.org", 80), timeout=5).close()
+        return True
+    except OSError:
+        return False
+
+
+def recorded_durations() -> list:
+    try:
+        return [float(x) for x in json.loads(DURATIONS.read_text())][-5:]
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def preflight(src: Path) -> dict:
+    """Prüfung vor der Installation: Platz, Pakete, Internet – und wie lange es ungefähr dauert."""
+    checks = []
+    free = shutil.disk_usage("/").free
+    checks.append({"label": "Speicherplatz auf der SD-Karte", "ok": free >= MIN_FREE,
+                   "text": f"{free // (1024 * 1024)} MB frei" + ("" if free >= MIN_FREE else " – mindestens 300 MB nötig")})
+    missing = missing_packages(src)
+    if missing:
+        online = internet_ok()
+        checks.append({"label": "Neue Programmpakete", "ok": online,
+                       "text": (f"{', '.join(missing)} – werden aus dem Internet geladen" if online else
+                                f"{', '.join(missing)} – dafür ist eine Internetverbindung nötig, die gerade fehlt")})
+    else:
+        checks.append({"label": "Programmpakete", "ok": True, "text": "alle vorhanden – kein Download nötig"})
+    past = recorded_durations()
+    # Ohne Erfahrungswerte: gut eine Minute für Kopieren, Einrichten und Dienst-Neustart
+    estimate = statistics.median(past) if past else 75
+    if missing:
+        estimate += 60 + 20 * len(missing)
+    return {"checks": checks, "ready": all(c["ok"] for c in checks), "estimate": int(estimate),
+            "estimate_from_history": bool(past), "reboot_delay": REBOOT_DELAY}
 
 
 def read_package(path: Path) -> bytes:
@@ -146,7 +209,7 @@ def stage(path_arg: str) -> dict:
     changelog = files.get("pinas/CHANGELOG.md", b"").decode("utf-8", "replace")
     info = {"version": version, "current": current, "sha256": sha, "built": manifest.get("built"),
             "newer": version_tuple(version) > version_tuple(current),
-            "notes": notes_since(changelog, current)}
+            "notes": notes_since(changelog, current), **preflight(STAGED)}
     (UPD / "staged.json").write_text(json.dumps(info, ensure_ascii=False))
     (UPD / "staged.json").chmod(0o644)
     path.unlink(missing_ok=True)
@@ -221,8 +284,12 @@ def run(source_arg: str) -> int:
         if INSTALLED.is_dir():
             shutil.copytree(INSTALLED, SWAP)
         old = installed_version()
+        started = time.monotonic()
         ok = install_from(WORK, log)
         if ok:
+            # Dauer merken – daraus schätzt die nächste Prüfung die Installationszeit
+            DURATIONS.write_text(json.dumps(recorded_durations() + [round(time.monotonic() - started)]))
+            DURATIONS.chmod(0o644)
             shutil.rmtree(PREVIOUS, ignore_errors=True)
             if SWAP.is_dir():
                 SWAP.rename(PREVIOUS)
@@ -231,9 +298,14 @@ def run(source_arg: str) -> int:
                 (UPD / "staged.json").unlink(missing_ok=True)
             shutil.rmtree(WORK, ignore_errors=True)
             what = "Zurück auf" if is_rollback else "Update auf"
-            write_status(state="done", version=version, previous=old,
-                         message=f"{what} Version {version} erfolgreich installiert.")
-            log.write("\n==> Fertig\n")
+            # Nach erfolgreicher Installation das ganze System frisch starten (Betriebszeit wird vorher gesichert)
+            reboot = subprocess.run(["/usr/local/sbin/pinas-helper", "power", "update-reboot"],
+                                    stdout=log, stderr=subprocess.STDOUT).returncode == 0
+            write_status(state="done", version=version, previous=old, reboot=reboot,
+                         reboot_at=int(time.time()) + REBOOT_DELAY if reboot else None,
+                         message=f"{what} Version {version} erfolgreich installiert."
+                         + (f" PiNAS startet in {REBOOT_DELAY} Sekunden neu." if reboot else ""))
+            log.write(f"\n==> Fertig{f' – Neustart in {REBOOT_DELAY} Sekunden' if reboot else ''}\n")
             return 0
         # Fehlgeschlagen: vorherige Version wiederherstellen
         log.write("\n==> FEHLER – stelle die vorherige Version wieder her\n")
@@ -261,8 +333,13 @@ def main() -> int:
         elif cmd == "discard" and not args:
             discard()
         elif cmd == "apply" and not args:
-            start(STAGED, json.loads((UPD / "staged.json").read_text())["version"]
-                  if (UPD / "staged.json").exists() else "?")
+            staged = json.loads((UPD / "staged.json").read_text()) if (UPD / "staged.json").exists() else {}
+            # Prüfung kurz vor dem Start wiederholen (z. B. Internet inzwischen weg)
+            check = preflight(STAGED)
+            if not check["ready"]:
+                bad = next(c for c in check["checks"] if not c["ok"])
+                raise UpdateError(f"Prüfung nicht bestanden – {bad['label']}: {bad['text']}")
+            start(STAGED, staged.get("version", "?"))
         elif cmd == "rollback" and not args:
             start(PREVIOUS, "vorherige Version")
         elif cmd == "run" and len(args) == 1:

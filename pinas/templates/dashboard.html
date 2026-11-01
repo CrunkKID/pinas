@@ -50,7 +50,7 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
 
 {% if power.pending %}
 <div class="flash error power-pending">
-  <span><b>{{ {'shutdown': 'PiNAS fährt herunter', 'reboot': 'PiNAS startet neu', 'safe-shutdown': 'Sicheres Herunterfahren: PiNAS fährt herunter'}.get(power.pending.action, 'PiNAS fährt herunter') }}</b>
+  <span><b>{{ {'shutdown': 'PiNAS fährt herunter', 'reboot': 'PiNAS startet neu', 'update-reboot': 'PiNAS startet nach dem Update neu', 'safe-shutdown': 'Sicheres Herunterfahren: PiNAS fährt herunter'}.get(power.pending.action, 'PiNAS fährt herunter') }}</b>
     um {{ power.pending.at_text }} – noch <b class="power-countdown" data-at="{{ power.pending.at }}">…</b></span>
   {% if user.is_admin %}
   <form method="post" action="{{ url_for('dashboard.power', action='abbrechen') }}" class="inline">
@@ -129,6 +129,19 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
     <small><span class="dot {{ s.cpu.color if s.cpu else 'off' }}" id="cpu-dot"></span><b id="cpu-text">{{ s.cpu.text if s.cpu else '–' }}</b></small>
     <small>Durchschnitt der letzten 15 Minuten: <span id="cpu-avg">{{ (s.cpu.avg15 ~ ' %') if s.cpu and s.cpu.avg15 is not none else '–' }}</span>
       · {{ s.cpus }} Kerne</small>
+  </div>
+  {% set e = s.energy %}
+  <div class="card stat energy-card" {{ tile('power', 'Energieverbrauch') }}>
+    <small>Energieverbrauch (live)</small>
+    <strong id="energy-total">{{ ('%.1f W'|format(e.total))|replace('.', ',') if e else '–' }}</strong>
+    <dl class="energy-list">
+      <div><dt>Raspberry Pi</dt><dd id="energy-pi">{{ ('%.1f W'|format(e.pi))|replace('.', ',') if e and e.pi is not none else '–' }}</dd></div>
+      <div><dt>Festplatte <span class="muted" id="energy-disk-state">{{ ('(' ~ e.disk.kind ~ (', ' if e.disk.kind else '') ~ e.disk.state ~ ')') if e and e.disk else '' }}</span></dt>
+        <dd id="energy-disk">{{ ('ca. ' ~ ('%.1f W'|format(e.disk.watts))|replace('.', ',')) if e and e.disk else 'keine' }}</dd></div>
+      <div class="energy-sum"><dt>PiNAS gesamt</dt><dd id="energy-total2">{{ ('%.1f W'|format(e.total))|replace('.', ',') if e else '–' }}</dd></div>
+    </dl>
+    <small>≈ <span id="energy-month">{{ (('%.1f kWh'|format(e.kwh_month)) ~ ' · ' ~ ('%.2f €'|format(e.euro_month)))|replace('.', ',') if e else '–' }}</span> pro Monat
+      <span class="muted" title="Pi: gemessen am Stromchip plus Grundverbrauch. Festplatte: geschätzt aus Plattentyp und Zustand (der Pi kann den Strom am USB-Anschluss nicht messen). Platten mit eigenem Netzteil zählen hier mit, ziehen ihren Strom aber aus der Steckdose. Kosten bei 35 ct/kWh.">ⓘ</span></small>
   </div>
   <div class="card stat" {{ tile('mem', 'Arbeitsspeicher') }}>
     <small>Arbeitsspeicher</small>

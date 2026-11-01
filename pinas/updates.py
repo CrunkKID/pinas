@@ -65,6 +65,33 @@ def _stage(path: Path) -> None:
         path.unlink(missing_ok=True)
 
 
+def start_reboot_watch(app) -> None:
+    """Übergang: Ein Updater bis 1.2.2 startet nach dem Update noch nicht neu. Dann übernimmt das
+    die frisch gestartete Weboberfläche – einmal pro Update (Merker in /var/lib/pinas)."""
+    import threading
+    import time
+
+    def watch():
+        deadline = time.time() + 600
+        while time.time() < deadline:
+            with app.app_context():
+                st = _read_json("status.json")
+                if st.get("state") == "running":
+                    time.sleep(5)
+                    continue
+                if st.get("state") == "done" and "reboot" not in st and time.time() - st.get("time", 0) < 600:
+                    marker = app.config["DB_PATH"].parent / f"update-reboot-{st.get('time')}"
+                    if not marker.exists():
+                        marker.write_text("")
+                        try:
+                            helper().power("update-reboot")
+                        except HelperError:
+                            pass
+            return
+
+    threading.Thread(target=watch, name="pinas-update-reboot", daemon=True).start()
+
+
 @bp.get("/")
 @admin_required
 def index():
@@ -76,9 +103,12 @@ def index():
             log = (current_app.config["UPDATE_DIR"] / "update.log").read_text(errors="replace")[-6000:]
         except OSError:
             pass
+    from .dashboard import power_state
+    pending = power_state()["pending"]
+    reboot_at = pending["at"] if pending and pending.get("action") == "update-reboot" else None
     return render_template("update.html", version=current_version(), staged=staged, st=st, log=log,
                            has_previous=(current_app.config["UPDATE_DIR"] / "previous").is_dir(),
-                           release=_last_check())
+                           release=_last_check(), reboot_at=reboot_at)
 
 
 def _last_check() -> dict:
