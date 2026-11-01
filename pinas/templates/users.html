@@ -25,7 +25,8 @@
           </form>
           {% if u.username != user.username %}
           <form method="post" action="{{ url_for('admin.delete', username=u.username) }}" class="inline"
-                onsubmit="return confirm('Benutzer {{ u.username }} wirklich löschen? Der private Ordner bleibt erhalten.')">
+                data-confirm="Das Konto „{{ u.username }}“ wird gelöscht. Der private Ordner mit allen Dateien bleibt auf der Festplatte erhalten."
+                data-confirm-title="Benutzer löschen?" data-confirm-ok="Benutzer löschen" data-confirm-danger>
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn-sm danger">Löschen</button>
           </form>
