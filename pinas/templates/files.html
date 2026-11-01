@@ -13,7 +13,7 @@
       <a href="{{ url_for('files.browse', root=key) }}" class="{{ 'active' if key == root }}">{{ label }}</a>
     {% endfor %}
   </div>
-  <div class="usage" title="{{ usage.used|filesize }} von {{ usage.total|filesize }} belegt">
+  <div class="usage" id="usage" title="{{ usage.used|filesize }} von {{ usage.total|filesize }} belegt">
     <div class="bar"><span style="width: {{ (usage.used / usage.total * 100)|round(1) if usage.total else 0 }}%"></span></div>
     <small>{{ usage.free|filesize }} frei</small>
   </div>
@@ -34,10 +34,16 @@
     <input type="hidden" name="name">
     <button type="button" id="mkdir-btn">Neuer Ordner</button>
   </form>
+  <a class="button" href="{{ url_for('trash.browse', root=root) }}">🗑 Papierkorb</a>
+  <div class="netspeed" title="Aktuelle Netzwerkgeschwindigkeit des NAS (auch Netzlaufwerk)">
+    <span><span class="arrow">↑</span> Hochladen <b id="net-rx">–</b></span>
+    <span><span class="arrow">↓</span> Herunterladen <b id="net-tx">–</b></span>
+  </div>
 </div>
 
 <div id="dropzone" class="dropzone" data-upload="{{ url_for('files.upload', root=root) }}" data-dir="{{ sub }}">
   <div id="progress" class="progress" hidden><span></span><small></small></div>
+  <div id="listing">
   {% if entries %}
   <table class="list">
     <thead><tr><th>Name</th><th class="num">Größe</th><th class="hide-sm">Geändert</th><th></th></tr></thead>
@@ -62,6 +68,7 @@
   {% else %}
   <p class="empty">Dieser Ordner ist leer. Dateien hierher ziehen oder „Hochladen“ wählen.</p>
   {% endif %}
+  </div>
 </div>
 
 <form method="post" id="action-form" hidden>
@@ -72,4 +79,7 @@
 </form>
 <span id="urls" hidden data-rename-url="{{ url_for('files.rename', root=root) }}" data-delete-url="{{ url_for('files.delete', root=root) }}"></span>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='files.js') }}"></script>{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='netspeed.js') }}"></script>
+<script src="{{ url_for('static', filename='files.js') }}"></script>
+{% endblock %}
