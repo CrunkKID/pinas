@@ -6,8 +6,9 @@ from pathlib import Path
 from flask import Flask, redirect, url_for
 
 from . import db
-from .config import load_config
+from .config import load_config, storage
 from .helper import SystemHelper
+from .history import History
 
 
 def _load_secret(path: Path) -> str:
@@ -33,15 +34,21 @@ def create_app() -> Flask:
         PERMANENT_SESSION_LIFETIME=timedelta(days=7),
         MAX_CONTENT_LENGTH=None,
     )
-    for d in (app.config["USERS_DIR"], app.config["SHARED_DIR"]):
-        d.mkdir(parents=True, exist_ok=True)
+    paths = storage(app.config)
+    for d in (paths["users"], paths["shared"]):
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass  # z. B. Platte nur lesend eingebunden
     db.init_db(app.config["DB_PATH"])
     app.teardown_appcontext(db.close_db)
     app.extensions["pinas_helper"] = SystemHelper(app.config["HELPER"])
+    app.extensions["pinas_history"] = History(app.config["DB_PATH"].parent / "history.json")
 
-    from . import admin, auth, dashboard, disk, files
+    from . import admin, auth, dashboard, disk, files, trash
     app.register_blueprint(auth.bp)
     app.register_blueprint(files.bp)
+    app.register_blueprint(trash.bp)
     app.register_blueprint(dashboard.bp)
     app.register_blueprint(admin.bp)
     app.register_blueprint(disk.bp)
