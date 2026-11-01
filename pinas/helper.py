@@ -14,10 +14,10 @@ class SystemHelper:
     def __init__(self, path: str):
         self.path = path
 
-    def _run(self, *args: str, stdin: str | None = None, timeout: int = 30) -> None:
+    def _run(self, *args: str, stdin: str | None = None, timeout: int = 30) -> str:
         if not self.path:
             log.info("Entwicklungsmodus – Helper übersprungen: %s", args[:2])
-            return
+            return ""
         is_root = getattr(os, "geteuid", lambda: 1)() == 0
         cmd = [self.path, *args] if is_root else ["sudo", "-n", self.path, *args]
         try:
@@ -26,6 +26,7 @@ class SystemHelper:
             raise HelperError(f"Hilfsskript konnte nicht ausgeführt werden: {exc}") from exc
         if res.returncode != 0:
             raise HelperError(res.stderr.strip() or f"Hilfsskript-Fehler ({res.returncode})")
+        return res.stdout
 
     def add_user(self, username: str, password: str) -> None:
         self._run("add-user", username, stdin=password + "\n")
@@ -46,3 +47,7 @@ class SystemHelper:
 
     def disk_sleep(self) -> None:
         self._run("disk-sleep", timeout=60)
+
+    def update(self, action: str, path: str | None = None) -> str:
+        """Update-Center: action "stage" (mit Paketpfad), "apply", "rollback" oder "discard"."""
+        return self._run(f"update-{action}", *([path] if path else []), timeout=120)

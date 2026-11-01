@@ -9,6 +9,8 @@
 #   pinas-helper set-layout folder|root     (Ordner-Aufteilung umstellen, siehe unten)
 #   pinas-helper samba-config               (Samba-Freigaben neu schreiben)
 #   pinas-helper disk-sleep                 (NAS-Platte sofort in den Ruhezustand)
+#   pinas-helper update-stage DATEI         (Update-Paket prüfen und bereitlegen, siehe pinas-update)
+#   pinas-helper update-apply|update-rollback|update-discard
 #
 # Ordner-Aufteilung (PINAS_SHARED_MODE in /etc/default/pinas):
 #   folder  „Gemeinsam“ = DATA/shared,  private Ordner in DATA/users/<name>
@@ -254,6 +256,14 @@ case "$cmd" in
   disk-sleep)
     [[ $# -eq 1 ]] || die "Aufruf: pinas-helper disk-sleep"
     exec /usr/local/sbin/pinas-diskpower --now
+    ;;
+  update-stage)
+    [[ $# -eq 2 ]] || die "Aufruf: pinas-helper update-stage DATEI"
+    exec /usr/local/sbin/pinas-update stage "$2"
+    ;;
+  update-apply|update-rollback|update-discard)
+    [[ $# -eq 1 ]] || die "Aufruf: pinas-helper $cmd"
+    exec /usr/local/sbin/pinas-update "${cmd#update-}"
     ;;
   *)
     die "Unbekannter Befehl: $cmd" ;;

@@ -26,6 +26,9 @@ def load_config() -> dict:
         # Hinter nginx mit https (auf dem Pi immer, im Entwicklungsmodus nicht)
         "PROXY": os.environ.get("PINAS_PROXY") == "1",
         "CA_CERT": Path(os.environ.get("PINAS_CA_CERT", "/etc/pinas/tls/ca.crt")),
+        # Update-Center: Status des Installers und GitHub-Repository für „Nach Updates suchen“
+        "UPDATE_DIR": Path(os.environ.get("PINAS_UPDATE_DIR", "/var/lib/pinas-update")),
+        "UPDATE_REPO": os.environ.get("PINAS_UPDATE_REPO", "CrunkKID/pinas"),
     }
 
 

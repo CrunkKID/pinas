@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Update-Center{% endblock %}
+{% block hero %}
+<section class="hero"><div class="inner">
+  <h1><b>Update</b>-Center</h1>
+  <p>Neue PiNAS-Versionen einspielen – ohne SD-Karte neu zu beschreiben. Deine Dateien und Einstellungen bleiben erhalten.</p>
+</div></section>
+{% endblock %}
+{% block content %}
+
+<div class="grid upd-top">
+  <div class="card stat">
+    <small>Installierte Version</small>
+    <strong id="upd-installed">{{ version }}</strong>
+    <small>{% if st.state == 'done' and st.time_text %}zuletzt aktualisiert am {{ st.time_text }}{% else %}PiNAS für Raspberry Pi 5{% endif %}</small>
+  </div>
+  <div class="card stat">
+    <small>Online nach Updates suchen</small>
+    {% if release.version %}
+      <strong>{{ release.version }}</strong>
+      <small>{% if release.newer %}<span class="dot ok"></span><b>Neue Version verfügbar</b>{% else %}<span class="dot off"></span>Du bist auf dem neuesten Stand{% endif %}
+        · geprüft {{ release.checked }}</small>
+    {% elif release.error %}
+      <small class="upd-error">{{ release.error }}</small>
+    {% else %}
+      <small>Fragt bei GitHub nach, ob es eine neuere Version gibt. Es wird nichts automatisch installiert.</small>
+    {% endif %}
+    <div class="upd-row">
+      <form method="post" action="{{ url_for('updates.check_online') }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn-sm">Nach Updates suchen</button>
+      </form>
+      {% if release.newer and not staged %}
+      <form method="post" action="{{ url_for('updates.download') }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn-sm primary">Version {{ release.version }} herunterladen</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if st.state == 'running' %}
+<div class="card upd-running" id="upd-running">
+  <h2><span class="spinner"></span> Update wird installiert …</h2>
+  <p>Das dauert meist 2–5 Minuten. Die Weboberfläche startet dabei neu und ist kurz nicht erreichbar –
+    diese Seite lädt sich danach von selbst neu. <b>Bitte den Pi jetzt nicht ausschalten.</b></p>
+</div>
+{% elif st.state == 'done' %}
+<div class="flash ok">✓ {{ st.message }}</div>
+{% elif st.state == 'failed' %}
+<div class="flash error">{{ st.message }}</div>
+{% endif %}
+
+{% if staged and st.state == 'staged' %}
+<h2>Bereit zur Installation</h2>
+<div class="card">
+  <p class="upd-version">Version <b>{{ staged.version }}</b>
+    {% if not staged.newer %}<span class="muted">– nicht neuer als die installierte Version {{ staged.current }}</span>{% endif %}</p>
+  {% if staged.notes %}
+  <div class="upd-notes">
+    {% for n in staged.notes %}
+    <h3>Neu in {{ n.version }}</h3>
+    <ul>{% for item in n['items'] %}<li>{{ item }}</li>{% endfor %}</ul>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <p class="muted upd-sha">Prüfsumme der Datei (SHA-256): <code>{{ staged.sha256 }}</code><br>
+    Bei einer ZIP von GitHub steht dieselbe Zahl dort unter „Artifacts“ als „Digest“.</p>
+  <div class="upd-row">
+    <form method="post" action="{{ url_for('updates.action', action='installieren') }}" class="inline"
+          data-confirm="PiNAS wird auf Version {{ staged.version }} aktualisiert. Die Weboberfläche und das Netzlaufwerk sind dabei ein paar Minuten nicht erreichbar. Laufende Kopiervorgänge vorher beenden."
+          data-confirm-title="Update installieren?" data-confirm-ok="Jetzt installieren">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="primary">Jetzt installieren</button>
+    </form>
+    <form method="post" action="{{ url_for('updates.action', action='verwerfen') }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button>Verwerfen</button>
+    </form>
+  </div>
+</div>
+{% elif st.state != 'running' %}
+<h2>Update-Datei vom PC einspielen</h2>
+<form method="post" action="{{ url_for('updates.upload') }}" enctype="multipart/form-data" class="card upd-upload" id="upd-upload">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label class="upd-drop" id="upd-drop">
+    <input type="file" name="package" accept=".zip,.gz,.tgz" required id="upd-file">
+    <span class="upd-drop-text" id="upd-drop-text"><b>Update-Datei auswählen</b> oder hierher ziehen<br>
+      <small class="muted">z. B. <code>pinas-update-1.3.0.zip</code> von GitHub – nicht entpacken</small></span>
+  </label>
+  <div><button class="primary">Prüfen</button></div>
+  <small class="muted">Die Datei wird zuerst vollständig geprüft. Installiert wird erst, wenn du es bestätigst.</small>
+</form>
+{% endif %}
+
+{% if has_previous and st.state != 'running' %}
+<h2>Zurück zur vorherigen Version</h2>
+<div class="card upd-row upd-rollback">
+  <p class="muted">Läuft nach einem Update etwas nicht wie gewünscht? PiNAS kann die zuvor installierte
+    {% if st.previous %}Version {{ st.previous }}{% else %}Version{% endif %} wiederherstellen. Deine Dateien bleiben unberührt.</p>
+  <form method="post" action="{{ url_for('updates.action', action='zurueck') }}" class="inline"
+        data-confirm="Die vorherige PiNAS-Version wird wiederhergestellt. Die Weboberfläche ist dabei ein paar Minuten nicht erreichbar."
+        data-confirm-title="Vorherige Version wiederherstellen?" data-confirm-ok="Wiederherstellen">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button>Vorherige Version wiederherstellen</button>
+  </form>
+</div>
+{% endif %}
+
+{% if log %}
+<details class="card upd-log"{% if st.state == 'failed' %} open{% endif %}>
+  <summary>Protokoll der letzten Installation</summary>
+  <pre>{{ log }}</pre>
+</details>
+{% endif %}
+
+<details class="card upd-help">
+  <summary>So kommst du an ein Update</summary>
+  <ol>
+    <li>Auf GitHub im Repository unter <b>Actions → „PiNAS-Update bauen“ → „Run workflow“</b> starten (dauert unter einer Minute).</li>
+    <li>Im fertigen Lauf unten unter <b>Artifacts</b> die Datei <code>pinas-update-…</code> herunterladen.</li>
+    <li>Die ZIP-Datei <b>so wie sie ist</b> oben auswählen oder hineinziehen → <b>Prüfen</b> → <b>Jetzt installieren</b>.</li>
+  </ol>
+  <p class="muted">Wird auf GitHub ein Release (z. B. <code>v1.3.0</code>) veröffentlicht, findet „Nach Updates suchen“ das Paket auch direkt.</p>
+</details>
+{% endblock %}
+{% block scripts %}
+<script>
+  // Datei per Ziehen ablegen und Dateinamen anzeigen
+  const drop = document.getElementById("upd-drop");
+  if (drop) {
+    const input = document.getElementById("upd-file");
+    const text = document.getElementById("upd-drop-text");
+    const show = () => {
+      if (!input.files.length) return;
+      const b = document.createElement("b");
+      b.textContent = input.files[0].name;
+      text.replaceChildren(b);
+    };
+    input.addEventListener("change", show);
+    ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("drag"); }));
+    ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove("drag")));
+    drop.addEventListener("drop", (e) => { e.preventDefault(); input.files = e.dataTransfer.files; show(); });
+  }
+  // Während der Installation den Status abfragen; die Weboberfläche ist zwischendurch kurz weg
+  if (document.getElementById("upd-running")) {
+    const poll = async () => {
+      try {
+        const r = await fetch("{{ url_for('updates.api_status') }}", { cache: "no-store", credentials: "same-origin" });
+        if (r.ok && (await r.json()).state !== "running") { location.reload(); return; }
+      } catch {}
+      setTimeout(poll, 4000);
+    };
+    setTimeout(poll, 4000);
+  }
+</script>
+{% endblock %}

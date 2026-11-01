@@ -1,0 +1,258 @@
+#!/usr/bin/python3 -I
+"""Update-Center von PiNAS (läuft als root, aufgerufen über pinas-helper).
+
+  pinas-update stage DATEI   Paket (.tar.gz oder GitHub-ZIP) prüfen und bereitlegen, Infos als JSON
+  pinas-update discard       bereitgelegtes Paket verwerfen
+  pinas-update apply         bereitgelegtes Paket im Hintergrund installieren
+  pinas-update rollback      im Hintergrund zur vorherigen Version zurückkehren
+  pinas-update run SOURCE    (intern, läuft als eigener systemd-Dienst, damit der Neustart
+                             der Weboberfläche das Update nicht abbricht)
+
+Geprüft wird: nur Dateien unter pinas/ und deploy/, jede Datei mit der SHA-256 aus manifest.json,
+Versionsnummer passt zu pinas/VERSION. Vor dem Einspielen wird die laufende Version gesichert;
+schlägt die Installation fehl, wird sie automatisch wiederhergestellt.
+"""
+import hashlib
+import io
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import time
+import zipfile
+from pathlib import Path
+
+UPD = Path("/var/lib/pinas-update")          # Arbeitsordner (Status lesbar, Rest nur root)
+STAGED = UPD / "staged"                      # geprüftes, entpacktes Paket
+PREVIOUS = UPD / "previous"                  # Quellen der Version vor dem letzten Update
+WORK = UPD / "work"
+SWAP = UPD / "swap"
+STATUS = UPD / "status.json"
+LOG = UPD / "update.log"
+INSTALLED = Path("/usr/local/share/pinas/src")  # Quellen der installierten Version (setup-system.sh)
+UPLOADS = Path("/var/lib/pinas/updates")     # hier legt die Weboberfläche hochgeladene Pakete ab
+MAX_SIZE = 50 * 1024 * 1024
+UNIT = "pinas-update-run"
+
+
+class UpdateError(Exception):
+    pass
+
+
+def version_tuple(v: str) -> tuple:
+    return tuple(int(x) for x in v.split("."))
+
+
+def installed_version() -> str:
+    try:
+        return Path("/opt/pinas/pinas/VERSION").read_text().strip()
+    except OSError:
+        return "0.0.0"
+
+
+def write_status(**fields) -> None:
+    UPD.mkdir(mode=0o755, exist_ok=True)
+    data = {"time": int(time.time()), **fields}
+    tmp = STATUS.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False))
+    tmp.chmod(0o644)
+    os.replace(tmp, STATUS)
+
+
+def notes_since(changelog: str, current: str) -> list:
+    """Abschnitte „## x.y.z“ aus CHANGELOG.md, die neuer als die installierte Version sind."""
+    out, section = [], None
+    for line in changelog.splitlines():
+        m = re.match(r"^##\s+(\d+\.\d+\.\d+)", line)
+        if m:
+            section = None
+            if version_tuple(m.group(1)) > version_tuple(current):
+                section = {"version": m.group(1), "items": []}
+                out.append(section)
+        elif section is not None and line.startswith("- "):
+            section["items"].append(line[2:].strip())
+    return out
+
+
+def read_package(path: Path) -> bytes:
+    """Liefert die .tar.gz-Daten; eine GitHub-Artifact-ZIP wird dabei ausgepackt."""
+    if path.stat().st_size > MAX_SIZE:
+        raise UpdateError("Die Datei ist zu groß für ein PiNAS-Update.")
+    data = path.read_bytes()
+    if data[:2] == b"PK":
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = [n for n in zf.namelist() if n.endswith(".tar.gz") and "/" not in n]
+            if len(names) != 1:
+                raise UpdateError("Die ZIP-Datei enthält kein PiNAS-Update-Paket.")
+            if zf.getinfo(names[0]).file_size > MAX_SIZE:
+                raise UpdateError("Das Update-Paket ist zu groß.")
+            data = zf.read(names[0])
+    if data[:2] != b"\x1f\x8b":
+        raise UpdateError("Das ist kein PiNAS-Update-Paket (erwartet: .tar.gz oder die ZIP von GitHub).")
+    return data
+
+
+def stage(path_arg: str) -> dict:
+    path = Path(path_arg).resolve()
+    if path.parent != UPLOADS or not path.is_file():
+        raise UpdateError("Ungültiger Pfad zum Update-Paket.")
+    raw = read_package(path)
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tar:
+        members = tar.getmembers()
+        files = {}
+        for m in members:
+            name = m.name
+            if name.startswith("/") or ".." in Path(name).parts or "\\" in name:
+                raise UpdateError(f"Unzulässiger Pfad im Paket: {name}")
+            if m.isdir():
+                continue
+            if not m.isfile():
+                raise UpdateError(f"Unzulässiger Eintrag im Paket: {name}")
+            if name != "manifest.json" and not name.startswith(("pinas/", "deploy/")):
+                raise UpdateError(f"Unerwartete Datei im Paket: {name}")
+            files[name] = tar.extractfile(m).read()
+
+        try:
+            manifest = json.loads(files.pop("manifest.json"))
+        except (KeyError, ValueError):
+            raise UpdateError("Dem Paket fehlt die Inhaltsliste (manifest.json).")
+        version = str(manifest.get("version", ""))
+        if manifest.get("format") != 1 or not re.fullmatch(r"\d+\.\d+\.\d+", version):
+            raise UpdateError("Unbekanntes Paketformat.")
+        listed = manifest.get("files", {})
+        if set(listed) != set(files):
+            raise UpdateError("Inhaltsliste und Paket passen nicht zusammen – Datei beschädigt?")
+        for name, body in files.items():
+            if hashlib.sha256(body).hexdigest() != listed[name]:
+                raise UpdateError(f"Prüfsumme falsch: {name} – Datei beschädigt?")
+        for required in ("deploy/install.sh", "deploy/setup-system.sh", "pinas/__init__.py"):
+            if required not in files:
+                raise UpdateError(f"Im Paket fehlt {required}.")
+        if files.get("pinas/VERSION", b"").decode().strip() != version:
+            raise UpdateError("Die Versionsnummer im Paket ist widersprüchlich.")
+
+        shutil.rmtree(STAGED, ignore_errors=True)
+        STAGED.mkdir(mode=0o700, parents=True)
+        tar.extractall(STAGED, filter="data")
+
+    current = installed_version()
+    changelog = files.get("pinas/CHANGELOG.md", b"").decode("utf-8", "replace")
+    info = {"version": version, "current": current, "sha256": sha, "built": manifest.get("built"),
+            "newer": version_tuple(version) > version_tuple(current),
+            "notes": notes_since(changelog, current)}
+    (UPD / "staged.json").write_text(json.dumps(info, ensure_ascii=False))
+    (UPD / "staged.json").chmod(0o644)
+    path.unlink(missing_ok=True)
+    write_status(state="staged", version=version, message=f"Version {version} ist bereit zur Installation.")
+    return info
+
+
+def discard() -> None:
+    shutil.rmtree(STAGED, ignore_errors=True)
+    (UPD / "staged.json").unlink(missing_ok=True)
+    write_status(state="idle", message="")
+
+
+def start(source: Path, label: str) -> None:
+    if not (source / "deploy" / "install.sh").is_file():
+        raise UpdateError("Es liegt nichts zum Installieren bereit.")
+    if subprocess.run(["systemctl", "is-active", "--quiet", UNIT]).returncode == 0:
+        raise UpdateError("Es läuft bereits ein Update.")
+    subprocess.run(["systemctl", "reset-failed", UNIT], capture_output=True)
+    write_status(state="running", version=label, message="Update wird installiert …")
+    res = subprocess.run(["systemd-run", f"--unit={UNIT}", "--collect", "--quiet",
+                          "--description=PiNAS-Update", sys.executable, "-I", os.path.abspath(__file__),
+                          "run", str(source)], capture_output=True, text=True)
+    if res.returncode != 0:
+        write_status(state="failed", version=label, message="Update konnte nicht gestartet werden.")
+        raise UpdateError(res.stderr.strip() or "systemd-run fehlgeschlagen")
+
+
+def install_from(src: Path, log) -> bool:
+    log.write(f"\n==> Installiere aus {src}\n")
+    log.flush()
+    res = subprocess.run(["bash", str(src / "deploy" / "install.sh")], stdout=log, stderr=subprocess.STDOUT,
+                         cwd=str(src), timeout=3600)
+    return res.returncode == 0
+
+
+def run(source_arg: str) -> int:
+    source = Path(source_arg)
+    is_rollback = source == PREVIOUS
+    with open(LOG, "w") as log:
+        os.chmod(LOG, 0o644)
+        log.write(time.strftime("PiNAS-Update gestartet %d.%m.%Y %H:%M:%S\n"))
+        # Quelle in einen eigenen Arbeitsordner kopieren (PREVIOUS wird gleich ersetzt)
+        shutil.rmtree(WORK, ignore_errors=True)
+        shutil.copytree(source, WORK)
+        version = (WORK / "pinas" / "VERSION").read_text().strip() if (WORK / "pinas" / "VERSION").exists() else "?"
+        # Sicherung der laufenden Version
+        shutil.rmtree(SWAP, ignore_errors=True)
+        if INSTALLED.is_dir():
+            shutil.copytree(INSTALLED, SWAP)
+        old = installed_version()
+        try:
+            ok = install_from(WORK, log)
+        except subprocess.TimeoutExpired:
+            ok = False
+        if ok:
+            shutil.rmtree(PREVIOUS, ignore_errors=True)
+            if SWAP.is_dir():
+                SWAP.rename(PREVIOUS)
+            if not is_rollback:
+                shutil.rmtree(STAGED, ignore_errors=True)
+                (UPD / "staged.json").unlink(missing_ok=True)
+            shutil.rmtree(WORK, ignore_errors=True)
+            what = "Zurück auf" if is_rollback else "Update auf"
+            write_status(state="done", version=version, previous=old,
+                         message=f"{what} Version {version} erfolgreich installiert.")
+            log.write("\n==> Fertig\n")
+            return 0
+        # Fehlgeschlagen: vorherige Version wiederherstellen
+        log.write("\n==> FEHLER – stelle die vorherige Version wieder her\n")
+        restored = SWAP.is_dir() and install_from(SWAP, log)
+        shutil.rmtree(WORK, ignore_errors=True)
+        write_status(state="failed", version=version,
+                     message=("Installation fehlgeschlagen – die vorherige Version läuft wieder. "
+                              if restored else "Installation fehlgeschlagen. ")
+                     + "Details im Protokoll.")
+        return 1
+
+
+def main() -> int:
+    if os.geteuid() != 0:
+        print("Bitte als root ausführen.", file=sys.stderr)
+        return 1
+    UPD.mkdir(mode=0o755, exist_ok=True)
+    cmd, args = (sys.argv[1] if len(sys.argv) > 1 else ""), sys.argv[2:]
+    try:
+        if cmd == "stage" and len(args) == 1:
+            print(json.dumps(stage(args[0]), ensure_ascii=False))
+        elif cmd == "discard" and not args:
+            discard()
+        elif cmd == "apply" and not args:
+            start(STAGED, json.loads((UPD / "staged.json").read_text())["version"]
+                  if (UPD / "staged.json").exists() else "?")
+        elif cmd == "rollback" and not args:
+            start(PREVIOUS, "vorherige Version")
+        elif cmd == "run" and len(args) == 1:
+            return run(args[0])
+        else:
+            print(__doc__, file=sys.stderr)
+            return 2
+    except UpdateError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
+        print(f"Das Paket ließ sich nicht lesen: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -26,7 +26,8 @@ DATA="$PINAS_DATA"
 
 echo "==> Pakete"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
+# Ohne Internet weitermachen: Sind alle Pakete schon da, klappt ein Update im Update-Center trotzdem
+apt-get update || echo "Paketlisten konnten nicht aktualisiert werden – fahre mit den vorhandenen fort"
 # ntfs-3g/exfatprogs: Platten vom Windows-PC ohne Formatieren verwenden
 apt-get install -y samba python3 python3-flask python3-waitress rsync sudo hdparm sdparm ntfs-3g exfatprogs \
   nginx openssl
@@ -68,6 +69,7 @@ chown -R root:root "$APP"
 
 echo "==> Hilfsskript und sudo-Regel"
 install -m 0755 -o root -g root "$SRC/deploy/pinas-helper" /usr/local/sbin/pinas-helper
+install -m 0755 -o root -g root "$SRC/deploy/pinas-update" /usr/local/sbin/pinas-update
 echo "pinas ALL=(root) NOPASSWD: /usr/local/sbin/pinas-helper" > /etc/sudoers.d/pinas
 chmod 0440 /etc/sudoers.d/pinas
 visudo -cf /etc/sudoers.d/pinas >/dev/null
@@ -111,6 +113,17 @@ install -m 0755 -o root -g root "$SRC/deploy/pinas-diskpower" /usr/local/sbin/pi
 install -m 0644 "$SRC/deploy/pinas-diskpower.service" /etc/systemd/system/pinas-diskpower.service
 install -m 0644 "$SRC/deploy/pinas-diskpower.timer" /etc/systemd/system/pinas-diskpower.timer
 systemctl enable pinas-diskpower.timer
+
+echo "==> Update-Center"
+# Quellen der installierten Version aufheben – daraus entsteht beim nächsten Update die Sicherung
+# für „Zurück zur vorherigen Version“
+mkdir -p /usr/local/share/pinas/src
+if [[ "$(cd "$SRC" && pwd -P)" != "/usr/local/share/pinas/src" ]]; then
+  rsync -a --delete --exclude '__pycache__' "$SRC/pinas" "$SRC/deploy" /usr/local/share/pinas/src/
+fi
+chown -R root:root /usr/local/share/pinas/src
+install -d -m 0755 -o root -g root /var/lib/pinas-update
+install -d -m 0700 -o pinas -g pinas "$STATE/updates"
 
 echo "==> Systemdienste"
 install -m 0644 "$SRC/deploy/pinas.service" /etc/systemd/system/pinas.service

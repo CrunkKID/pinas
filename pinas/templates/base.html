@@ -29,6 +29,7 @@
       {% if user.is_admin %}
       <a href="{{ url_for('admin.index') }}" class="{{ 'active' if request.blueprint == 'admin' }}">Benutzer</a>
       <a href="{{ url_for('disk.index') }}" class="{{ 'active' if request.blueprint == 'disk' }}">Laufwerk</a>
+      <a href="{{ url_for('updates.index') }}" class="{{ 'active' if request.blueprint == 'updates' }}">Update</a>
       {% endif %}
       <a href="{{ url_for('auth.account') }}" class="{{ 'active' if request.endpoint == 'auth.account' }}">Konto</a>
     </div>

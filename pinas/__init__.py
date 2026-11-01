@@ -50,9 +50,10 @@ def create_app() -> Flask:
     app.extensions["pinas_helper"] = SystemHelper(app.config["HELPER"])
     app.extensions["pinas_history"] = History(app.config["DB_PATH"].parent / "history.json")
 
-    from . import admin, auth, dashboard, disk, files, tls, trash
+    from . import admin, auth, dashboard, disk, files, tls, trash, updates
     app.register_blueprint(auth.bp)
     app.register_blueprint(tls.bp)
+    app.register_blueprint(updates.bp)
     app.register_blueprint(files.bp)
     app.register_blueprint(trash.bp)
     app.register_blueprint(dashboard.bp)

@@ -70,6 +70,7 @@ button.link:hover { color: var(--text); background: none; }
 .btn-sm { padding: .2rem .6rem; font-size: .85rem; border-width: 1px; border-color: var(--border);
   border-radius: var(--pill); text-decoration: none; background: var(--surface); }
 .btn-sm:hover { border-color: var(--text); }
+.btn-sm.primary { background: var(--btn); color: var(--btn-text); border-color: var(--btn); }
 .danger:hover { color: var(--bad); border-color: var(--bad); }
 button.danger { border-color: var(--bad); color: var(--bad); }
 form.inline { display: inline; margin: 0; }
@@ -342,6 +343,32 @@ select { font: inherit; padding: .55rem .8rem; border: 1px solid var(--border); 
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: .45rem; }
 .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.off { background: var(--border); }
 .dot.warn { background: #e8a33d; }
+
+/* Update-Center */
+.upd-top { margin-bottom: 1rem; }
+.upd-row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+.stat .upd-row { margin-top: .4rem; }
+.upd-error { color: var(--bad) !important; }
+.upd-upload { display: grid; gap: .9rem; }
+.upd-drop { position: relative; display: grid; place-items: center; min-height: 140px; padding: 1.5rem; text-align: center; cursor: pointer;
+  border: 2px dashed var(--border); border-radius: var(--radius); background: var(--band); font-weight: 400; }
+.upd-drop:hover, .upd-drop.drag { border-color: var(--accent); }
+.upd-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.upd-version { font-size: 1.15rem; margin-top: 0; }
+.upd-notes h3 { font-size: 1rem; margin: 1rem 0 .3rem; }
+.upd-notes ul { margin: 0; padding-left: 1.2rem; display: grid; gap: .25rem; }
+.upd-sha code { word-break: break-all; }
+.upd-rollback { justify-content: space-between; }
+.upd-rollback p { margin: 0; flex: 1 1 320px; }
+.upd-log, .upd-help { margin-top: 1rem; }
+.upd-log summary, .upd-help summary { cursor: pointer; font-weight: 600; }
+.upd-log pre { max-height: 360px; overflow: auto; font-size: .8rem; background: var(--band); padding: .8rem;
+  border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
+.upd-help ol { padding-left: 1.2rem; display: grid; gap: .4rem; }
+.upd-running h2 { margin-top: 0; display: flex; align-items: center; gap: .6rem; }
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--accent);
+  animation: spin 1s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Dashboard anpassen */
 .dash-bar { display: flex; justify-content: flex-end; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: 1rem; }
