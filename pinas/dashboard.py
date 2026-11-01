@@ -45,16 +45,34 @@ def memory() -> dict | None:
     return {"total": total, "used": total - avail}
 
 
+def format_duration(secs: float) -> str:
+    d, rem = divmod(int(secs), 86400)
+    h, rem = divmod(rem, 3600)
+    parts = ([f"{d} {'Tag' if d == 1 else 'Tage'}"] if d else []) + [f"{h} Std", f"{rem // 60} Min"]
+    return " ".join(parts)
+
+
 def uptime() -> dict | None:
     raw = _read("/proc/uptime")
     if not raw:
         return None
     secs = int(float(raw.split()[0]))
-    d, rem = divmod(secs, 86400)
-    h, rem = divmod(rem, 3600)
-    parts = ([f"{d} {'Tag' if d == 1 else 'Tage'}"] if d else []) + [f"{h} Std", f"{rem // 60} Min"]
     since = datetime.now() - timedelta(seconds=secs)
-    return {"text": " ".join(parts), "since": since.strftime("%d.%m.%Y, %H:%M Uhr")}
+    return {"text": format_duration(secs), "since": since.strftime("%d.%m.%Y, %H:%M Uhr")}
+
+
+def history() -> dict:
+    """Gesamtbetriebszeit über alle Neustarts und höchste CPU-Temperatur (siehe history.py)."""
+    hist = current_app.extensions["pinas_history"]
+    hist.sample()
+    h = hist.snapshot()
+    fmt = lambda ts: datetime.fromtimestamp(ts).strftime("%d.%m.%Y, %H:%M Uhr") if ts else None
+    return {
+        "total_text": format_duration(h["total"]) if h["since"] else None,
+        "since_text": fmt(h["since"]),
+        "temp_max": h["temp_max"],
+        "temp_max_at_text": fmt(h["temp_max_at"]),
+    }
 
 
 def disk_io() -> dict | None:
@@ -70,6 +88,22 @@ def disk_io() -> dict | None:
             # Felder 6 und 10: gelesene/geschriebene Sektoren (immer 512 Byte)
             return {"device": dev, "read": int(f[5]) * 512, "written": int(f[9]) * 512}
     return None
+
+
+def net_bytes() -> dict | None:
+    """Seit dem Einschalten empfangene/gesendete Bytes aller Netzwerkschnittstellen (ohne lo)."""
+    raw = _read("/proc/net/dev")
+    if not raw:
+        return None
+    rx = tx = 0
+    for line in raw.splitlines()[2:]:
+        name, _, data = line.partition(":")
+        f = data.split()
+        if name.strip() == "lo" or len(f) < 9:
+            continue
+        rx += int(f[0])
+        tx += int(f[8])
+    return {"rx": rx, "tx": tx}
 
 
 def throttled() -> str | None:
@@ -90,16 +124,46 @@ def throttled() -> str | None:
     return ", ".join(problems) or "OK"
 
 
+def _names_file() -> Path:
+    return current_app.config["DB_PATH"].parent / "disk-names.json"
+
+
+def disk_names() -> dict:
+    """Vom Nutzer vergebene Namen, Schlüssel ist die stabile Kennung der Platte (disk_key)."""
+    try:
+        return json.loads(_names_file().read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_disk_names(names: dict) -> None:
+    path = _names_file()
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(names, ensure_ascii=False))
+    os.replace(tmp, path)
+
+
+def disk_key(disk: dict) -> str:
+    """Bleibt gleich, auch wenn die Platte an einem anderen USB-Port als sdb statt sda auftaucht."""
+    serial = (disk.get("serial") or "").strip()
+    model = (disk.get("model") or "").strip()
+    return f"serial:{serial}" if serial else f"model:{model}:{disk.get('size')}"
+
+
 def block_devices() -> list[dict]:
-    out = _cmd("lsblk", "-J", "-b", "-o", "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,TRAN,LABEL")
+    out = _cmd("lsblk", "-J", "-b", "-o", "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,TRAN,LABEL,SERIAL")
     if not out:
         return []
+    names = disk_names()
     devices = []
     for disk in json.loads(out).get("blockdevices", []):
         if disk.get("type") != "disk" or disk["name"].startswith(("loop", "zram", "ram")):
             continue
+        key = disk_key(disk)
         devices.append({
             "name": disk["name"],
+            "key": key,
+            "alias": names.get(key, ""),
             "model": (disk.get("model") or "").strip() or "–",
             "tran": disk.get("tran") or "–",
             "size": int(disk.get("size") or 0),
@@ -112,8 +176,37 @@ def block_devices() -> list[dict]:
     return devices
 
 
-def service_state(name: str) -> str:
-    return _cmd("systemctl", "is-active", name) or "unbekannt"
+# Systemdienste mit verständlichem Namen; "optional": fehlt der Dienst, ist das kein Fehler
+SERVICES = [
+    {"unit": "smbd", "label": "Netzlaufwerk",
+     "desc": "Stellt „Privat“ und „Gemeinsam“ als Laufwerk für Windows, Mac und Handy bereit", "optional": False},
+    {"unit": "avahi-daemon", "label": "Adresse pinas.local",
+     "desc": "Damit das NAS unter seinem Namen statt über die IP-Adresse erreichbar ist", "optional": False},
+    {"unit": "wsdd", "label": "Windows-Netzwerkumgebung",
+     "desc": "Zeigt das NAS im Windows-Explorer unter „Netzwerk“ an", "optional": True},
+    {"unit": "nmbd", "label": "Gerätename für ältere Geräte",
+     "desc": "Findet das NAS mit älteren Windows-Versionen und Geräten (NetBIOS)", "optional": True},
+    {"unit": "pinas-diskpower.timer", "label": "Energiesparen",
+     "desc": "Prüft jede Minute, ob die Festplatte schlafen gelegt werden kann", "optional": True},
+]
+
+_STATE_TEXT = {"active": "läuft", "activating": "startet …", "reloading": "startet neu …",
+               "deactivating": "wird beendet …", "inactive": "gestoppt", "failed": "Fehler"}
+
+
+def service_info(unit: str) -> dict:
+    """Zustand eines systemd-Dienstes als Text und Farbe (ok / bad / off)."""
+    try:
+        res = subprocess.run(["systemctl", "show", "-p", "LoadState", "-p", "ActiveState", unit],
+                             capture_output=True, text=True, timeout=5)
+        props = dict(line.split("=", 1) for line in res.stdout.splitlines() if "=" in line)
+    except (OSError, subprocess.TimeoutExpired):
+        return {"state": "unbekannt", "color": "off"}
+    if props.get("LoadState") == "not-found":
+        return {"state": "nicht installiert", "color": "off"}
+    active = props.get("ActiveState", "")
+    color = "ok" if active == "active" else ("off" if active.endswith("ing") else "bad")
+    return {"state": _STATE_TEXT.get(active, active or "unbekannt"), "color": color}
 
 
 def stats() -> dict:
@@ -126,7 +219,9 @@ def stats() -> dict:
         "cpus": os.cpu_count(),
         "memory": memory(),
         "uptime": uptime(),
+        "history": history(),
         "io": disk_io(),
+        "net": net_bytes(),
         "throttled": throttled(),
         "disk": {"total": du.total, "used": du.used, "free": du.free, "path": str(data_dir),
                  "is_mount": os.path.ismount(data_dir)},
@@ -136,11 +231,22 @@ def stats() -> dict:
 @bp.get("/dashboard")
 @login_required
 def index():
-    services = {s: service_state(s) for s in ("smbd", "nmbd", "wsdd", "avahi-daemon")}
-    return render_template("dashboard.html", s=stats(), devices=block_devices(), services=services)
+    services = [{**svc, **service_info(svc["unit"])} for svc in SERVICES]
+    devices = block_devices()
+    data_dir = str(current_app.config["DATA_DIR"])
+    data_alias = next((d["alias"] for d in devices if any(p["mount"] == data_dir for p in d["parts"])), "")
+    return render_template("dashboard.html", s=stats(), devices=devices, services=services,
+                           data_alias=data_alias)
 
 
 @bp.get("/api/stats")
 @login_required
 def api_stats():
     return jsonify(stats())
+
+
+@bp.get("/api/netz")
+@login_required
+def api_net():
+    """Leichtgewichtig, wird alle 2 Sekunden für die Live-Geschwindigkeit abgefragt."""
+    return jsonify(net_bytes() or {})
