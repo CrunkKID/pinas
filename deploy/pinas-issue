@@ -1,0 +1,28 @@
+#!/bin/bash
+# Schreibt den Hinweis über der Anmeldezeile am Pi-Bildschirm mit der aktuellen IP-Adresse.
+# Läuft beim Start (pinas-issue.service) und bei jeder Netzwerkänderung (NetworkManager-Dispatcher).
+PINAS_PORT=8080
+# shellcheck disable=SC1091
+[[ -r /etc/default/pinas ]] && . /etc/default/pinas
+
+ips="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.' || true)"
+{
+  echo
+  if [[ -n "$ips" ]]; then
+    echo "  PiNAS laeuft. Bedienung im Browser eines anderen Geraets (PC, Handy):"
+    echo
+    for ip in $ips; do
+      echo "      http://$ip:$PINAS_PORT"
+    done
+    echo "      http://$(hostname).local:$PINAS_PORT"
+  else
+    echo "  PiNAS laeuft, hat aber noch KEINE Netzwerkverbindung."
+    echo "  Netzwerkkabel einstecken oder WLAN im Raspberry Pi Imager einrichten."
+  fi
+  echo
+  echo "  Hier am Bildschirm ist keine Anmeldung noetig."
+  echo
+} > /etc/issue.d/pinas.issue
+
+# Angezeigte Anmeldeaufforderung aktualisieren
+agetty --reload 2>/dev/null || true
