@@ -4,7 +4,7 @@ import getpass
 import sys
 
 from . import db, users
-from .config import load_config
+from .config import load_config, storage
 from .helper import SystemHelper
 
 
@@ -32,7 +32,7 @@ def main() -> None:
     helper = SystemHelper(cfg["HELPER"])
     try:
         if args.cmd == "add-user":
-            name = users.create_user(conn, helper, cfg["USERS_DIR"], args.username, _ask_password(), args.admin)
+            name = users.create_user(conn, helper, storage(cfg)["users"], args.username, _ask_password(), args.admin)
             print(f"Benutzer „{name}“ angelegt{' (Admin)' if args.admin else ''}.")
         elif args.cmd == "set-password":
             users.set_password(conn, helper, args.username, _ask_password())
