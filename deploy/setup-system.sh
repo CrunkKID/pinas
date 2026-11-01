@@ -12,19 +12,26 @@ STATE=/var/lib/pinas
 # Einstellungen: vorhandene /etc/default/pinas behalten, sonst Standardwerte
 PINAS_DATA="${PINAS_DATA:-/srv/nas}"
 PINAS_PORT="${PINAS_PORT:-8080}"
+PINAS_SHARED_MODE="${PINAS_SHARED_MODE:-folder}"
 # shellcheck disable=SC1091
 [[ -r /etc/default/pinas ]] && . /etc/default/pinas
 cat > /etc/default/pinas <<EOF
 # PiNAS-Einstellungen (nach Änderung: sudo systemctl restart pinas)
 PINAS_DATA=$PINAS_DATA
 PINAS_PORT=$PINAS_PORT
+# folder = eigene Ordner users/ und shared/, root = „Gemeinsam“ zeigt die ganze Platte
+PINAS_SHARED_MODE=$PINAS_SHARED_MODE
 EOF
+chmod 0644 /etc/default/pinas
 DATA="$PINAS_DATA"
 
 echo "==> Pakete"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y samba python3 python3-flask python3-waitress rsync sudo
+# ntfs-3g/exfatprogs: Platten vom Windows-PC ohne Formatieren verwenden
+apt-get install -y samba python3 python3-flask python3-waitress rsync sudo hdparm sdparm ntfs-3g exfatprogs
+# Samba-Modul "recycle" für den Papierkorb beim Netzlaufwerk (je nach Debian-Version schon in samba enthalten)
+apt-get install -y samba-vfs-modules || echo "samba-vfs-modules nicht verfügbar – übersprungen"
 # Damit das NAS in der Windows-Netzwerkumgebung auftaucht (optional)
 apt-get install -y wsdd || echo "wsdd nicht verfügbar – übersprungen"
 
@@ -35,9 +42,21 @@ id pinas &>/dev/null || useradd --system --home-dir "$STATE" --shell /usr/sbin/n
 usermod -aG video pinas
 
 echo "==> Verzeichnisse"
-mkdir -p "$STATE" "$DATA/users" "$DATA/shared" "$DATA/.tmp"
-chown pinas:pinas "$DATA" "$DATA/users" "$DATA/shared" "$DATA/.tmp"
-chmod 0770 "$DATA" "$DATA/users" "$DATA/shared" "$DATA/.tmp"
+mkdir -p "$STATE"
+if [[ "$PINAS_SHARED_MODE" == "root" ]]; then
+  NAS_DIRS=("$DATA/.pinas" "$DATA/.pinas/users" "$DATA/.tmp")
+else
+  NAS_DIRS=("$DATA/users" "$DATA/shared" "$DATA/.tmp")
+fi
+mkdir -p "${NAS_DIRS[@]}"
+# Auf NTFS/exFAT gibt es keine Linux-Rechte – das regeln dort die Mount-Optionen
+case "$(findmnt -no FSTYPE -T "$DATA" 2>/dev/null || true)" in
+  fuseblk|ntfs*|exfat|vfat) ;;
+  *)
+    chown pinas:pinas "$DATA" "${NAS_DIRS[@]}"
+    chmod 0770 "$DATA" "${NAS_DIRS[@]}"
+    ;;
+esac
 chown -R pinas:pinas "$STATE"
 chmod 0700 "$STATE"
 
@@ -55,10 +74,11 @@ visudo -cf /etc/sudoers.d/pinas >/dev/null
 
 echo "==> Samba"
 [[ -f /etc/samba/smb.conf.pinas-backup ]] || cp /etc/samba/smb.conf /etc/samba/smb.conf.pinas-backup
-sed "s|@DATA_DIR@|$DATA|g" "$SRC/deploy/smb-pinas.conf" > /etc/samba/pinas.conf
+install -D -m 0644 "$SRC/deploy/smb-pinas.conf" /usr/local/share/pinas/smb-pinas.conf.in
 grep -q '^include = /etc/samba/pinas.conf' /etc/samba/smb.conf || \
   printf '\n# PiNAS-Freigaben\ninclude = /etc/samba/pinas.conf\n' >> /etc/samba/smb.conf
-testparm -s >/dev/null 2>&1 || { echo "Samba-Konfiguration fehlerhaft:"; testparm -s; exit 1; }
+# Erzeugt /etc/samba/pinas.conf passend zur Ordner-Aufteilung und prüft sie mit testparm
+/usr/local/sbin/pinas-helper samba-config
 
 echo "==> Hinweis auf dem Pi-Bildschirm"
 # Zeigt über der Anmeldezeile die echte IP-Adresse an, aktualisiert bei jeder Netzwerkänderung
@@ -71,6 +91,12 @@ if [[ -d /etc/NetworkManager/dispatcher.d ]]; then
 fi
 /usr/local/sbin/pinas-issue
 systemctl enable pinas-issue
+
+echo "==> Energiesparen für die Festplatte"
+install -m 0755 -o root -g root "$SRC/deploy/pinas-diskpower" /usr/local/sbin/pinas-diskpower
+install -m 0644 "$SRC/deploy/pinas-diskpower.service" /etc/systemd/system/pinas-diskpower.service
+install -m 0644 "$SRC/deploy/pinas-diskpower.timer" /etc/systemd/system/pinas-diskpower.timer
+systemctl enable pinas-diskpower.timer
 
 echo "==> Systemdienste"
 install -m 0644 "$SRC/deploy/pinas.service" /etc/systemd/system/pinas.service
