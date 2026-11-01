@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Laufwerk{% endblock %}
+{% block hero %}
+<section class="hero"><div class="inner">
+  <h1><b>Festplatte</b> einrichten</h1>
+  <p>Wähle die USB-Platte, auf der deine Daten gespeichert werden sollen.</p>
+</div></section>
+{% endblock %}
 {% block content %}
-<h1>Laufwerk</h1>
 
 {% if source %}
 <div class="flash ok">NAS-Speicher: <b>{{ source }}</b> ist unter {{ data_dir }} eingehängt.</div>

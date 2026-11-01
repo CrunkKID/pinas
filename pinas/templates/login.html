@@ -4,6 +4,7 @@
 {% block content %}
 <form method="post" class="card login">
   <div class="brand big"><span class="logo"></span>PiNAS</div>
+  <h1>Willkommen <b>zurück</b></h1>
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <label>Benutzername<input name="username" autocomplete="username" autocapitalize="none" required autofocus></label>
   <label>Passwort<input name="password" type="password" autocomplete="current-password" required></label>

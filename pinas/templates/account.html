@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Konto{% endblock %}
+{% block hero %}
+<section class="hero"><div class="inner">
+  <h1>Dein <b>Konto</b></h1>
+  <p>Angemeldet als {{ user.username }}.</p>
+</div></section>
+{% endblock %}
 {% block content %}
-<h1>Konto: {{ user.username }}</h1>
 
 <div class="card">
   <h2>Netzlaufwerk verbinden</h2>

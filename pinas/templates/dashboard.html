@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
+{% block hero %}
+<section class="hero"><div class="inner">
+  <h1>Dein <b>NAS</b> auf einen Blick</h1>
+  <p>Speicher, Temperatur und Dienste – die Werte aktualisieren sich automatisch.</p>
+</div></section>
+{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
 
 {% if not s.disk.is_mount %}
 <div class="flash error">
@@ -18,6 +23,19 @@
     <small id="disk-free">{{ s.disk.free|filesize }} frei von {{ s.disk.total|filesize }}</small>
   </div>
   <div class="card stat">
+    <small>Betriebszeit</small>
+    <strong id="uptime">{{ s.uptime.text if s.uptime else '–' }}</strong>
+    <small>eingeschaltet seit <span id="boot">{{ s.uptime.since if s.uptime else '–' }}</span></small>
+  </div>
+  <div class="card stat">
+    <small>Datenübertragung{% if s.io %} ({{ s.io.device }}){% endif %}</small>
+    <div class="io">
+      <div><span class="io-label">Gelesen</span><strong id="io-read">{{ s.io.read|filesize if s.io else '–' }}</strong></div>
+      <div><span class="io-label">Geschrieben</span><strong id="io-written">{{ s.io.written|filesize if s.io else '–' }}</strong></div>
+    </div>
+    <small>seit dem Einschalten</small>
+  </div>
+  <div class="card stat">
     <small>CPU-Temperatur</small>
     <strong id="temp">{{ '%.1f °C'|format(s.temp) if s.temp is not none else '–' }}</strong>
     <small>Stromversorgung: <span id="throttled">{{ s.throttled or '–' }}</span></small>
@@ -25,7 +43,7 @@
   <div class="card stat">
     <small>Last (1/5/15 min, {{ s.cpus }} Kerne)</small>
     <strong id="load">{{ s.load|join(' · ') if s.load else '–' }}</strong>
-    <small>Laufzeit: <span id="uptime">{{ s.uptime or '–' }}</span></small>
+    <small>Durchschnittliche Auslastung</small>
   </div>
   <div class="card stat">
     <small>Arbeitsspeicher</small>

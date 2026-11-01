@@ -14,7 +14,8 @@
       const s = await r.json();
       if (s.temp != null) set("temp", `${s.temp.toFixed(1).replace(".", ",")} °C`);
       if (s.load) set("load", s.load.join(" · "));
-      set("uptime", s.uptime || "–");
+      if (s.uptime) { set("uptime", s.uptime.text); set("boot", s.uptime.since); }
+      if (s.io) { set("io-read", fmt(s.io.read)); set("io-written", fmt(s.io.written)); }
       set("throttled", s.throttled || "–");
       set("disk-used", fmt(s.disk.used));
       set("disk-free", `${fmt(s.disk.free)} frei von ${fmt(s.disk.total)}`);

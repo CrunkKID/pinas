@@ -1,9 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Benutzer{% endblock %}
+{% block hero %}
+<section class="hero"><div class="inner">
+  <h1><b>Benutzer</b> verwalten</h1>
+  <p>Jedes Konto gilt für diese Oberfläche und für das Netzlaufwerk (Freigaben „Privat“ und „Gemeinsam“).</p>
+</div></section>
+{% endblock %}
 {% block content %}
-<h1>Benutzer</h1>
-<p class="muted">Jeder Benutzer kann sich mit denselben Zugangsdaten hier und am Netzlaufwerk anmelden
-  (Freigaben <b>Privat</b> und <b>Gemeinsam</b>).</p>
 
 <div class="card">
   <table class="list">

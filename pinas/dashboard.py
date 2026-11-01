@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, render_template
@@ -44,14 +45,31 @@ def memory() -> dict | None:
     return {"total": total, "used": total - avail}
 
 
-def uptime() -> str | None:
+def uptime() -> dict | None:
     raw = _read("/proc/uptime")
     if not raw:
         return None
     secs = int(float(raw.split()[0]))
     d, rem = divmod(secs, 86400)
     h, rem = divmod(rem, 3600)
-    return f"{d} T {h} Std {rem // 60} Min" if d else f"{h} Std {rem // 60} Min"
+    parts = ([f"{d} {'Tag' if d == 1 else 'Tage'}"] if d else []) + [f"{h} Std", f"{rem // 60} Min"]
+    since = datetime.now() - timedelta(seconds=secs)
+    return {"text": " ".join(parts), "since": since.strftime("%d.%m.%Y, %H:%M Uhr")}
+
+
+def disk_io() -> dict | None:
+    """Seit dem Einschalten gelesene/geschriebene Bytes des Laufwerks mit den NAS-Daten."""
+    source = _cmd("findmnt", "-no", "SOURCE", "-T", str(current_app.config["DATA_DIR"]))
+    raw = _read("/proc/diskstats")
+    if not source or not source.startswith("/dev/") or not raw:
+        return None
+    dev = source.rsplit("/", 1)[-1]
+    for line in raw.splitlines():
+        f = line.split()
+        if len(f) > 9 and f[2] == dev:
+            # Felder 6 und 10: gelesene/geschriebene Sektoren (immer 512 Byte)
+            return {"device": dev, "read": int(f[5]) * 512, "written": int(f[9]) * 512}
+    return None
 
 
 def throttled() -> str | None:
@@ -108,6 +126,7 @@ def stats() -> dict:
         "cpus": os.cpu_count(),
         "memory": memory(),
         "uptime": uptime(),
+        "io": disk_io(),
         "throttled": throttled(),
         "disk": {"total": du.total, "used": du.used, "free": du.free, "path": str(data_dir),
                  "is_mount": os.path.ismount(data_dir)},

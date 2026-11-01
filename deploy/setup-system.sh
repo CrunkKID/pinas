@@ -60,6 +60,19 @@ grep -q '^include = /etc/samba/pinas.conf' /etc/samba/smb.conf || \
   printf '\n# PiNAS-Freigaben\ninclude = /etc/samba/pinas.conf\n' >> /etc/samba/smb.conf
 testparm -s >/dev/null 2>&1 || { echo "Samba-Konfiguration fehlerhaft:"; testparm -s; exit 1; }
 
+echo "==> Hinweis auf dem Pi-Bildschirm"
+# Erscheint über der Anmeldezeile am Monitor; \4 setzt agetty durch die aktuelle IP-Adresse
+mkdir -p /etc/issue.d
+cat > /etc/issue.d/pinas.issue <<EOF
+
+  PiNAS laeuft. Bedienung im Browser eines anderen Geraets:
+
+      http://\\4:$PINAS_PORT      (oder http://\\n.local:$PINAS_PORT)
+
+  Hier am Bildschirm ist keine Anmeldung noetig.
+
+EOF
+
 echo "==> Systemdienste"
 install -m 0644 "$SRC/deploy/pinas.service" /etc/systemd/system/pinas.service
 systemctl enable smbd pinas

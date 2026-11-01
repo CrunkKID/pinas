@@ -9,23 +9,31 @@
 </head>
 <body>
   {% if user %}
-  <header class="topbar">
-    <a class="brand" href="{{ url_for('index') }}"><span class="logo"></span>PiNAS</a>
-    <nav>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="{{ url_for('index') }}"><span class="logo"></span>PiNAS</a>
+      <div class="usermenu">
+        <a href="{{ url_for('auth.account') }}"><span class="uname">Angemeldet als </span><b>{{ user.username }}</b></a>
+        <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="link">Abmelden</button>
+        </form>
+      </div>
+    </div>
+  </header>
+  <nav class="subnav">
+    <div class="inner">
       <a href="{{ url_for('files.browse', root='privat') }}" class="{{ 'active' if request.blueprint == 'files' }}">Dateien</a>
       <a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.blueprint == 'dashboard' }}">Dashboard</a>
       {% if user.is_admin %}
       <a href="{{ url_for('admin.index') }}" class="{{ 'active' if request.blueprint == 'admin' }}">Benutzer</a>
       <a href="{{ url_for('disk.index') }}" class="{{ 'active' if request.blueprint == 'disk' }}">Laufwerk</a>
       {% endif %}
-      <a href="{{ url_for('auth.account') }}" class="{{ 'active' if request.endpoint == 'auth.account' }}">{{ user.username }}</a>
-      <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="link">Abmelden</button>
-      </form>
-    </nav>
-  </header>
+      <a href="{{ url_for('auth.account') }}" class="{{ 'active' if request.endpoint == 'auth.account' }}">Konto</a>
+    </div>
+  </nav>
   {% endif %}
+  {% block hero %}{% endblock %}
   <main class="{% block mainclass %}container{% endblock %}">
     {% for cat, msg in get_flashed_messages(with_categories=true) %}
       <div class="flash {{ cat }}">{{ msg }}</div>
