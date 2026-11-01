@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""Energiesparen für die NAS-Festplatte. Läuft als root jede Minute (pinas-diskpower.timer).
+
+- Ruhezustand nach X Minuten ohne Zugriff (Motor stoppt, Platte wird leise)
+- Zeitplan: im eingestellten Zeitraum schon nach 2 Minuten Ruhe schlafen legen,
+  am Ende des Zeitraums die Platte wieder aufwecken
+- "--now": sofort schlafen legen (Knopf in der Weboberfläche)
+
+Die Platte wacht bei jedem Zugriff (Netzlaufwerk, Weboberfläche) automatisch auf.
+Einstellungen kommen aus /var/lib/pinas/disk-power.json (von der Weboberfläche geschrieben).
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime
+
+STATE_DIR = "/var/lib/pinas"
+CONFIG = os.path.join(STATE_DIR, "disk-power.json")
+STATUS = os.path.join(STATE_DIR, "disk-power-status.json")
+RUNTIME = "/run/pinas-diskpower.json"
+SCHEDULE_IDLE_MINUTES = 2
+
+
+def sh(*args, timeout=30):
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def load(path, default):
+    try:
+        with open(path) as f:
+            return {**default, **json.load(f)}
+    except (OSError, ValueError):
+        return dict(default)
+
+
+def save(path, data, mode=0o644):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+def data_disk():
+    """Gerätename der Platte mit den NAS-Daten, z. B. "sda" – oder None (SD-Karte/NVMe)."""
+    data_dir = "/srv/nas"
+    try:
+        with open("/etc/default/pinas") as f:
+            for line in f:
+                if line.startswith("PINAS_DATA="):
+                    data_dir = line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    res = sh("findmnt", "-no", "SOURCE", "-T", data_dir)
+    source = res.stdout.strip() if res and res.returncode == 0 else ""
+    if not source.startswith("/dev/sd"):
+        return None
+    res = sh("lsblk", "-no", "PKNAME", source)
+    parent = res.stdout.strip() if res and res.returncode == 0 else ""
+    return parent or source.rsplit("/", 1)[-1]
+
+
+def io_count(disk):
+    with open("/proc/diskstats") as f:
+        for line in f:
+            p = line.split()
+            if p[2] == disk:
+                return int(p[3]) + int(p[7])  # abgeschlossene Lese- + Schreibvorgänge
+    return None
+
+
+def standby(disk):
+    dev = f"/dev/{disk}"
+    sh("sync")
+    res = sh("hdparm", "-y", dev)
+    if not res or res.returncode != 0:
+        res = sh("sdparm", "--readonly", "--command=stop", dev)
+    return bool(res and res.returncode == 0)
+
+
+def wake(disk):
+    sh("dd", f"if=/dev/{disk}", "of=/dev/null", "bs=4096", "count=1", "iflag=direct", timeout=60)
+
+
+def power_state(disk):
+    res = sh("hdparm", "-C", f"/dev/{disk}")
+    out = res.stdout if res and res.returncode == 0 else ""
+    if "standby" in out or "sleeping" in out:
+        return "standby"
+    if "active" in out or "idle" in out:
+        return "active"
+    return "unknown"
+
+
+def minutes(hhmm):
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def in_window(now_min, start, end):
+    s, e = minutes(start), minutes(end)
+    return s <= now_min < e if s <= e else (now_min >= s or now_min < e)
+
+
+def main():
+    cfg = load(CONFIG, {"idle_minutes": 0, "schedule_enabled": False, "start": "23:00", "end": "07:00"})
+    state = load(RUNTIME, {"disk": None, "count": None, "last_activity": time.time(),
+                           "asleep": False, "in_window": False, "asleep_since": None})
+    now = time.time()
+    disk = data_disk()
+    if not disk:
+        save(STATUS, {"disk": None, "state": "none", "updated": now})
+        return
+
+    count = io_count(disk)
+    if state["disk"] != disk or count != state["count"]:
+        state.update(disk=disk, count=count, last_activity=now, asleep=False, asleep_since=None)
+
+    now_min = datetime.now().hour * 60 + datetime.now().minute
+    window = cfg["schedule_enabled"] and in_window(now_min, cfg["start"], cfg["end"])
+
+    if "--now" in sys.argv:
+        if standby(disk):
+            state.update(asleep=True, asleep_since=now)
+    elif state["in_window"] and not window:
+        # Zeitplan zu Ende: Platte wieder einschalten
+        wake(disk)
+        state.update(asleep=False, asleep_since=None, last_activity=now)
+    else:
+        limit = SCHEDULE_IDLE_MINUTES if window else int(cfg["idle_minutes"])
+        if limit and not state["asleep"] and now - state["last_activity"] >= limit * 60:
+            if standby(disk):
+                state.update(asleep=True, asleep_since=now)
+
+    state["in_window"] = window
+    state["count"] = io_count(disk)  # Standby/Aufwecken nicht als Zugriff werten
+    save(RUNTIME, state)
+
+    hw = power_state(disk)
+    save(STATUS, {
+        "disk": disk,
+        "state": hw if hw != "unknown" else ("standby" if state["asleep"] else "active"),
+        "asleep_since": state["asleep_since"],
+        "last_activity": state["last_activity"],
+        "in_window": window,
+        "updated": now,
+    })
+
+
+if __name__ == "__main__":
+    main()
