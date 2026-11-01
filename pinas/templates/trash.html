@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Papierkorb{% endblock %}
+{% block hero %}
+<section class="hero"><div class="inner">
+  <h1>Dein <b>Papierkorb</b></h1>
+  <p>Gelöschte Dateien – auch aus dem Netzlaufwerk – landen erst hier.
+    {% if days %}Nach {{ days }} {{ 'Tag' if days == 1 else 'Tagen' }} werden sie endgültig entfernt.
+    {% else %}Sie bleiben, bis du sie selbst endgültig löschst.{% endif %}</p>
+</div></section>
+{% endblock %}
+{% block content %}
+<div class="files-head">
+  <div class="tabs">
+    {% for key, label in roots.items() %}
+      <a href="{{ url_for('trash.browse', root=key) }}" class="{{ 'active' if key == root }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <a class="button" href="{{ url_for('files.browse', root=root) }}">← Zurück zu den Dateien</a>
+</div>
+
+<nav class="crumbs">
+  <a href="{{ url_for('trash.browse', root=root) }}">Papierkorb {{ roots[root] }}</a>
+  {% for name, path in crumbs %}<span>/</span><a href="{{ url_for('trash.browse', root=root, sub=path) }}">{{ name }}</a>{% endfor %}
+</nav>
+
+<div class="toolbar">
+  <span class="muted">{{ entries|length }} {{ 'Eintrag' if entries|length == 1 else 'Einträge' }} · {{ total|filesize }}</span>
+  {% if entries and not sub %}
+  <form method="post" action="{{ url_for('trash.empty', root=root) }}" class="inline trash-empty"
+        data-confirm="Alle {{ entries|length }} Einträge im Papierkorb „{{ roots[root] }}“ werden endgültig gelöscht. Das lässt sich nicht rückgängig machen."
+        data-confirm-title="Papierkorb leeren?" data-confirm-ok="Endgültig löschen" data-confirm-danger>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="danger">Papierkorb leeren</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="dropzone">
+  {% if entries %}
+  <table class="list">
+    <thead><tr><th>Name</th><th class="num">Größe</th><th class="hide-sm">Gelöscht am</th><th class="hide-sm">Endgültig weg am</th><th></th></tr></thead>
+    <tbody>
+    {% for e in entries %}
+      <tr>
+        <td class="name">
+          <span class="icon {{ 'dir' if e.is_dir else 'file' }}"></span>
+          {% if e.is_dir %}<a href="{{ url_for('trash.browse', root=root, sub=e.path) }}">{{ e.name }}</a>{% else %}{{ e.name }}{% endif %}
+        </td>
+        <td class="num">{{ e.size|filesize }}</td>
+        <td class="hide-sm muted">{{ e.deleted }}</td>
+        <td class="hide-sm muted">{{ e.expires or 'nie' }}</td>
+        <td class="actions">
+          <form method="post" action="{{ url_for('trash.restore', root=root) }}" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="path" value="{{ e.path }}">
+            <input type="hidden" name="dir" value="{{ sub }}">
+            <button class="btn-sm" title="An den ursprünglichen Ort zurücklegen">↩ Wiederherstellen</button>
+          </form>
+          <form method="post" action="{{ url_for('trash.delete_forever', root=root) }}" class="inline"
+                data-confirm="„{{ e.name }}“ wird endgültig gelöscht. Das lässt sich nicht rückgängig machen."
+                data-confirm-title="Endgültig löschen?" data-confirm-ok="Endgültig löschen" data-confirm-danger>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="path" value="{{ e.path }}">
+            <input type="hidden" name="dir" value="{{ sub }}">
+            <button class="btn-sm danger" title="Endgültig löschen">🗑</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">Der Papierkorb ist leer.</p>
+  {% endif %}
+</div>
+
+{% if user.is_admin %}
+<h2>Automatisch leeren</h2>
+<form method="post" action="{{ url_for('trash.settings') }}" class="card trash-settings">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="root" value="{{ root }}">
+  <label>Gelöschte Dateien endgültig entfernen nach
+    <select name="days">
+      {% for d in choices %}
+        <option value="{{ d }}"{% if d == days %} selected{% endif %}>
+          {{ 'Nie (nur von Hand leeren)' if d == 0 else d ~ (' Tag' if d == 1 else ' Tagen') }}
+        </option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="primary">Speichern</button>
+  <small class="muted">Gilt für alle Papierkörbe (alle Benutzer und „Gemeinsam“). Geprüft wird stündlich.
+    Solange Dateien im Papierkorb liegen, belegen sie weiter Platz auf der Festplatte.</small>
+</form>
+{% endif %}
+{% endblock %}
