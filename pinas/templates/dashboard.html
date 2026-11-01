@@ -16,16 +16,32 @@
 {% endif %}
 
 <div class="grid">
-  <div class="card stat">
-    <small>Speicher ({{ s.disk.path }})</small>
-    <strong id="disk-used">{{ s.disk.used|filesize }}</strong>
-    <div class="bar"><span id="disk-bar" style="width: {{ (s.disk.used / s.disk.total * 100)|round(1) if s.disk.total else 0 }}%"></span></div>
-    <small id="disk-free">{{ s.disk.free|filesize }} frei von {{ s.disk.total|filesize }}</small>
+  {% set pct = (s.disk.used / s.disk.total * 100) if s.disk.total else 0 %}
+  <div class="card stat disk-card">
+    <small>{{ data_alias or 'Festplatte' }} ({{ s.disk.path }})</small>
+    <div class="disk-chart">
+      <svg viewBox="0 0 120 120" class="donut" role="img" aria-labelledby="donut-title">
+        <title id="donut-title">{{ '%.0f'|format(pct) }} % belegt: {{ s.disk.used|filesize }} von {{ s.disk.total|filesize }}</title>
+        <circle class="donut-track" cx="60" cy="60" r="50"/>
+        <circle class="donut-used" id="donut-used" cx="60" cy="60" r="50" pathLength="100"
+                stroke-dasharray="{{ '%.2f'|format(pct) }} 100" transform="rotate(-90 60 60)"/>
+        <text x="60" y="61" class="donut-pct" id="donut-pct">{{ '%.0f'|format(pct) }} %</text>
+        <text x="60" y="79" class="donut-sub">belegt</text>
+      </svg>
+      <dl class="disk-legend">
+        <div><dt><span class="swatch used"></span>Belegt</dt><dd id="disk-used">{{ s.disk.used|filesize }}</dd></div>
+        <div><dt><span class="swatch free"></span>Frei</dt><dd id="disk-free">{{ s.disk.free|filesize }}</dd></div>
+        <div><dt>Gesamt</dt><dd id="disk-total">{{ s.disk.total|filesize }}</dd></div>
+      </dl>
+    </div>
+    <small class="disk-warn" id="disk-warn"{% if pct < 90 %} hidden{% endif %}>⚠ Die Festplatte ist fast voll.</small>
   </div>
   <div class="card stat">
-    <small>Betriebszeit</small>
-    <strong id="uptime">{{ s.uptime.text if s.uptime else '–' }}</strong>
-    <small>eingeschaltet seit <span id="boot">{{ s.uptime.since if s.uptime else '–' }}</span></small>
+    <small>Betriebszeit gesamt</small>
+    <strong id="uptime-total">{{ s.history.total_text or (s.uptime.text if s.uptime else '–') }}</strong>
+    <small>seit dem letzten Start: <span id="uptime">{{ s.uptime.text if s.uptime else '–' }}</span>
+      (<span id="boot">{{ s.uptime.since if s.uptime else '–' }}</span>)</small>
+    {% if s.history.since_text %}<small>gezählt seit {{ s.history.since_text }}</small>{% endif %}
   </div>
   <div class="card stat">
     <small>Datenübertragung{% if s.io %} ({{ s.io.device }}){% endif %}</small>
@@ -36,8 +52,18 @@
     <small>seit dem Einschalten</small>
   </div>
   <div class="card stat">
+    <small>Netzwerk (live)</small>
+    <div class="io">
+      <div><span class="io-label">↑ Hochladen zum NAS</span><strong id="net-rx">–</strong></div>
+      <div><span class="io-label">↓ Herunterladen</span><strong id="net-tx">–</strong></div>
+    </div>
+    <small>seit dem Einschalten: <span id="net-total">{{ (s.net.rx|filesize ~ ' empfangen, ' ~ s.net.tx|filesize ~ ' gesendet') if s.net else '–' }}</span></small>
+  </div>
+  <div class="card stat">
     <small>CPU-Temperatur</small>
-    <strong id="temp">{{ '%.1f °C'|format(s.temp) if s.temp is not none else '–' }}</strong>
+    <strong id="temp">{{ ('%.1f °C'|format(s.temp))|replace('.', ',') if s.temp is not none else '–' }}</strong>
+    <small>Höchstwert: <b id="temp-max">{{ ('%.1f °C'|format(s.history.temp_max))|replace('.', ',') if s.history.temp_max is not none else '–' }}</b>
+      <span id="temp-max-at">{{ ('am ' ~ s.history.temp_max_at_text) if s.history.temp_max_at_text else '' }}</span></small>
     <small>Stromversorgung: <span id="throttled">{{ s.throttled or '–' }}</span></small>
   </div>
   <div class="card stat">
@@ -56,16 +82,25 @@
 <h2>Dienste</h2>
 <div class="card">
   <ul class="services">
-    {% for name, state in services.items() %}
-      <li><span class="dot {{ 'ok' if state == 'active' else 'bad' }}"></span>{{ name }} <small class="muted">{{ state }}</small></li>
+    {% for svc in services %}
+      {% set color = 'off' if (svc.optional and svc.color == 'bad') else svc.color %}
+      <li>
+        <div class="svc-text">
+          <b>{{ svc.label }}</b>
+          <small class="muted">{{ svc.desc }}</small>
+        </div>
+        <span class="svc-state {{ color }}" title="Systemdienst: {{ svc.unit }}"><span class="dot {{ color }}"></span>{{ svc.state }}</span>
+      </li>
     {% endfor %}
   </ul>
+  <p class="muted svc-note">Grün = läuft, Rot = gestört und sollte laufen, Grau = gestoppt oder nicht nötig.</p>
 </div>
 
 <h2>Laufwerke</h2>
 {% for d in devices %}
 <div class="card">
-  <strong>/dev/{{ d.name }}</strong> <span class="muted">{{ d.model }} · {{ d.tran|upper }} · {{ d.size|filesize }}</span>
+  <strong>{{ d.alias or '/dev/' ~ d.name }}</strong>
+  <span class="muted">{% if d.alias %}/dev/{{ d.name }} · {% endif %}{{ d.model }} · {{ d.tran|upper }} · {{ d.size|filesize }}</span>
   {% if d.parts %}
   <table class="list compact">
     <thead><tr><th>Partition</th><th>Dateisystem</th><th class="num">Größe</th><th>Eingehängt</th></tr></thead>
@@ -81,4 +116,7 @@
 <p class="muted">Keine Laufwerksinformationen verfügbar.</p>
 {% endfor %}
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script>{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='netspeed.js') }}"></script>
+<script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+{% endblock %}
