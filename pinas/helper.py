@@ -60,6 +60,23 @@ class SystemHelper:
         """shutdown, reboot, safe-shutdown, disk-off, disk-on oder cancel."""
         self._run("power", action, timeout=120)
 
+    def rtc_wake(self, seconds: int) -> None:
+        """Weckruf der Uhr in so vielen Sekunden; 0 löscht ihn."""
+        self._run("rtc-wake", str(seconds))
+
+    def rtc_wake_setup(self) -> None:
+        """Bootloader fürs Wecken per Uhr einstellen, wird beim nächsten Neustart übernommen."""
+        self._run("rtc-wake-setup", timeout=120)
+
+    def timer_notice(self, seconds: int) -> None:
+        """Abschalt-Timer: Hinweis mit Restzeit auf jeder Seite anzeigen."""
+        self._run("timer-notice", str(seconds))
+
+    def timer_run(self, wake_seconds: int, force: bool = False) -> None:
+        """Abschalt-Timer: Festplatte abmelden, Weckruf setzen, herunterfahren.
+        force: auch wenn am Netzlaufwerk noch Dateien geöffnet sind."""
+        self._run("timer-run", str(wake_seconds), "force" if force else "wait", timeout=120)
+
     def factory_reset(self, wipe: bool) -> None:
         """Startet das Zurücksetzen im Hintergrund; wipe=True leert zusätzlich die Festplatte."""
         self._run("factory-reset", "wipe" if wipe else "keep", timeout=60)

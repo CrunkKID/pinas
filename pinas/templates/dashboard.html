@@ -172,6 +172,74 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
 </div>
 
 <div class="dash-sections">
+{% if timer %}
+<link rel="stylesheet" href="{{ url_for('static', filename='powertimer.css') }}">
+<section id="abschalttimer" {{ tile('timer', 'Abschalt-Timer') }}>
+<h2>Abschalt-Timer</h2>
+<div class="card">
+  {% if timer.enabled and timer.next_off %}
+  <p class="pt-next"><span class="dot ok"></span>Nächste Abschaltung: <b>{{ timer.next_off }}</b>
+    {% if timer.next_on %}· Einschalten: <b>{{ timer.next_on }}</b>{% else %}· Einschalten mit dem Knopf am Pi{% endif %}</p>
+  {% if not timer.clock_ok %}
+  <p class="flash error">Die Uhrzeit ist gerade nicht sicher (kein Internet und die Uhr wurde zurückgesetzt). Der Timer wartet, bis sie wieder stimmt.</p>
+  {% endif %}
+  {% endif %}
+  <form method="post" action="{{ url_for('dashboard.timer_save') }}" class="pt-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="check"><input type="checkbox" name="enabled" value="1"{% if timer.enabled %} checked{% endif %}> PiNAS automatisch abschalten</label>
+    <div class="pt-rows">
+      <fieldset class="schedule">
+        <legend>Abschalten</legend>
+        <label>Uhrzeit<input type="time" name="off" value="{{ timer.off }}" required></label>
+        <div class="pt-days" role="group" aria-label="Tage zum Abschalten">
+          {% for name in timer.day_names %}
+          <label><input type="checkbox" name="off_{{ loop.index0 }}" value="1"{% if loop.index0 in timer.off_days %} checked{% endif %}><span>{{ name }}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <fieldset class="schedule">
+        <legend>Einschalten</legend>
+        <label>Uhrzeit<input type="time" name="on" value="{{ timer.on }}" required></label>
+        <div class="pt-days" role="group" aria-label="Tage zum Einschalten">
+          {% for name in timer.day_names %}
+          <label><input type="checkbox" name="on_{{ loop.index0 }}" value="1"{% if loop.index0 in timer.on_days %} checked{% endif %}><span>{{ name }}</span></label>
+          {% endfor %}
+        </div>
+        <label class="check"><input type="checkbox" name="wake" value="1"{% if timer.wake %} checked{% endif %}> Automatisch wieder einschalten</label>
+      </fieldset>
+    </div>
+    <div class="power-actions"><button class="primary">Speichern</button></div>
+  </form>
+
+  <div class="pt-wake">
+    {% set ws = timer.wake_status %}
+    <p><span class="dot {{ {'ready': 'ok', 'pending': 'warn', 'setup': 'warn'}.get(ws.state, 'off') }}"></span><b>{{ ws.text }}</b>
+      {% if ws.state == 'pending' %}<span class="muted">Dafür oben auf „Neustart“ klicken.</span>{% endif %}</p>
+    {% if timer.last_on %}
+    <p class="muted">Zuletzt eingeschaltet: {{ timer.last_on.text }}{% if timer.last_on.on_time %} – wie geplant{% elif timer.last_on.planned %} – nicht zur geplanten Zeit (Knopf oder Strom?){% endif %}</p>
+    {% endif %}
+    {% if ws.state == 'setup' %}
+    <form method="post" action="{{ url_for('dashboard.timer_setup') }}" class="inline"
+          data-confirm="PiNAS ändert zwei Einstellungen im Bootloader des Pi (POWER_OFF_ON_HALT=1, WAKE_ON_GPIO=0), dabei kann auch der Bootloader selbst auf den neuesten Stand kommen. Das ist der von Raspberry Pi vorgesehene Weg. Übernommen wird es beim nächsten Neustart, dabei bitte nicht den Strom trennen. Danach ist der Pi beim Herunterfahren wirklich aus (auch die USB-Anschlüsse) und braucht fast keinen Strom; der Einschaltknopf funktioniert weiter."
+          data-confirm-title="Einschalten per Uhr einrichten?" data-confirm-ok="Einrichten">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn-sm">Einschalten per Uhr einrichten</button>
+    </form>
+    {% elif ws.state == 'ready' %}
+    <form method="post" action="{{ url_for('dashboard.timer_test') }}" class="inline"
+          data-confirm="PiNAS fährt jetzt herunter und sollte sich nach etwa {{ timer.test_minutes }} Minuten von selbst wieder einschalten. Klappt das nicht, starte es mit dem Einschaltknopf am Pi. Netzlaufwerk und Dateien sind so lange nicht erreichbar."
+          data-confirm-title="Probelauf starten?" data-confirm-ok="Probelauf starten">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn-sm">Probelauf: aus und in {{ timer.test_minutes }} Minuten wieder an</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="muted pt-note">5 Minuten vorher erscheint auf jeder Seite ein Hinweis mit „Abbrechen“. Läuft gerade eine Übertragung oder ein Update, wird verschoben.
+    Die Einschaltzeit gilt auch, wenn du PiNAS von Hand herunterfährst. Einschalten klappt nur, solange der Pi am Strom hängt.
+    Nach einem Stromausfall startet er von selbst und bleibt bis zur nächsten Abschaltzeit an; das gilt auch, wenn du ihn in der Aus-Zeit mit dem Knopf einschaltest.</p>
+</div>
+</section>
+{% endif %}
 {% if event_rows is not none %}
 <link rel="stylesheet" href="{{ url_for('static', filename='events.css') }}">
 <section {{ tile('events', 'Ereignisse') }}>

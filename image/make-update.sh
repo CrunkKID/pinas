@@ -8,6 +8,9 @@ cd "$(dirname "$0")/.."
 VERSION="$(tr -d '[:space:]' < pinas/VERSION)"
 OUT="${1:-pinas-update-$VERSION.tar.gz}"
 
+# Syntaxfehler in den Skripten schon hier abfangen, nicht erst beim Installieren auf dem Pi
+for f in deploy/pinas-helper deploy/install.sh deploy/setup-system.sh; do bash -n "$f"; done
+
 python3 - "$VERSION" "$OUT" <<'EOF'
 import hashlib, io, json, sys, tarfile, time
 from pathlib import Path

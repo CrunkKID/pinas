@@ -1,0 +1,16 @@
+/* Abschalt-Timer (Dashboard) */
+.pt-next { margin: 0 0 1rem; }
+.pt-form { display: grid; gap: 1rem; }
+.pt-rows { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.pt-rows .schedule { align-content: start; }
+.pt-rows legend { padding: 0 .4rem; font-weight: 600; }
+.pt-days { display: flex; flex-wrap: wrap; gap: .3rem; }
+.pt-days label { cursor: pointer; }
+.pt-days input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.pt-days span { display: block; min-width: 2.3rem; padding: .3rem 0; text-align: center; font-size: .85rem;
+  border: 1px solid var(--border); border-radius: var(--pill); color: var(--muted); }
+.pt-days input:checked + span { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.pt-days input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pt-wake { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.pt-wake p { margin: 0 0 .6rem; }
+.pt-note { margin: 1rem 0 0; font-size: .85rem; }

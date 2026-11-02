@@ -18,5 +18,7 @@ openssl
 # Samba-Module "recycle" (Papierkorb) und "full_audit" (Ereignis-Protokoll) fürs Netzlaufwerk
 # (je nach Debian-Version schon in samba enthalten)
 ?samba-vfs-modules
+# Bootloader-Einstellung fürs Einschalten per Uhr (Abschalt-Timer), auf Raspberry Pi OS schon vorhanden
+?rpi-eeprom
 # Damit das NAS in der Windows-Netzwerkumgebung auftaucht
 ?wsdd

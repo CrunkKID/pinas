@@ -1,6 +1,7 @@
 """System-Dashboard: Temperatur, Last, RAM, Speicherplatz, Laufwerke, Dienste."""
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -11,7 +12,7 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
-from . import events, transfers
+from . import events, powertimer, transfers
 from .auth import admin_required, helper, login_required
 from .db import get_db
 from .helper import HelperError
@@ -413,7 +414,7 @@ def power(action):
 
 
 # Kacheln und Bereiche des Dashboards in der Standard-Reihenfolge
-TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "power", "events", "services", "devices"]
+TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "power", "timer", "events", "services", "devices"]
 
 
 def layout() -> dict:
@@ -463,6 +464,70 @@ def save_options():
             flash(f"Zugriffe übers Netzlaufwerk werden nicht protokolliert: {exc}", "error")
     flash("Optionen gespeichert.", "ok")
     return redirect(url_for("dashboard.index"))
+
+
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+@bp.post("/dashboard/abschalttimer")
+@admin_required
+def timer_save():
+    f = request.form
+    new = {"enabled": f.get("enabled") == "1", "off": f.get("off", ""), "on": f.get("on", ""),
+           "wake": f.get("wake") == "1",
+           "off_days": [d for d in range(7) if f"off_{d}" in f], "on_days": [d for d in range(7) if f"on_{d}" in f]}
+    status = powertimer.wake_status()["state"]
+    if not (_TIME_RE.match(new["off"]) and _TIME_RE.match(new["on"])):
+        flash("Bitte gültige Uhrzeiten eintragen.", "error")
+    elif new["enabled"] and not new["off_days"]:
+        flash("Bitte mindestens einen Tag zum Abschalten wählen.", "error")
+    elif new["enabled"] and new["wake"] and not new["on_days"]:
+        flash("Bitte mindestens einen Tag zum Einschalten wählen.", "error")
+    elif new["enabled"] and new["wake"] and new["off"] == new["on"]:
+        flash("Abschalten und Einschalten dürfen nicht zur selben Uhrzeit sein.", "error")
+    elif new["enabled"] and new["wake"] and status not in ("ready", "pending"):
+        flash("Das Einschalten per Uhr ist noch nicht eingerichtet: Richte es zuerst ein "
+              "oder nimm das Häkchen bei „Automatisch wieder einschalten“ weg.", "error")
+    else:
+        try:
+            powertimer.save_config(current_app.config, helper(), new)
+            events.log("setting", "Abschalt-Timer " + (f"eingeschaltet: aus {new['off']} Uhr" +
+                       (f", an {new['on']} Uhr" if new["wake"] else "") if new["enabled"] else "ausgeschaltet"))
+            flash("Abschalt-Timer gespeichert.", "ok")
+        except HelperError as exc:
+            flash(str(exc), "error")
+    return redirect(url_for("dashboard.index") + "#abschalttimer")
+
+
+@bp.post("/dashboard/abschalttimer/uhr-einrichten")
+@admin_required
+def timer_setup():
+    try:
+        helper().rtc_wake_setup()
+        events.log("setting", "Einschalten per Uhr eingerichtet (Bootloader)")
+        flash("Vorbereitet. Bitte starte PiNAS jetzt einmal neu, erst dann ist es eingerichtet.", "ok")
+    except HelperError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("dashboard.index") + "#abschalttimer")
+
+
+@bp.post("/dashboard/abschalttimer/probelauf")
+@admin_required
+def timer_test():
+    """PiNAS jetzt abschalten und nach wenigen Minuten von der Uhr wecken lassen."""
+    running = transfers.busy()
+    if powertimer.wake_status()["state"] != "ready":
+        flash("Für den Probelauf muss das Einschalten per Uhr eingerichtet und PiNAS einmal neu gestartet sein.", "error")
+    elif running:
+        flash(transfers.describe(running), "error")
+    else:
+        try:
+            secs = powertimer.TEST_SECONDS
+            powertimer.shutdown(current_app.config, helper(), secs, time.time() + secs, label="Probelauf. ")
+            flash(f"Probelauf: PiNAS fährt herunter und schaltet sich in etwa {secs // 60} Minuten wieder ein.", "ok")
+        except HelperError as exc:
+            flash(str(exc), "error")
+    return redirect(url_for("dashboard.index") + "#abschalttimer")
 
 
 @bp.get("/dashboard/ereignisse")
@@ -521,7 +586,8 @@ def index():
         event_rows = events.recent(current_app.config, EVENTS_IN_TILE)
     return render_template("dashboard.html", s=stats(), devices=devices, services=services,
                            data_alias=data_alias, layout=layout(), power=power_state(), options=opts,
-                           event_rows=event_rows)
+                           event_rows=event_rows,
+                           timer=powertimer.view(current_app.config) if g.user["is_admin"] else None)
 
 
 @bp.post("/api/dashboard-layout")

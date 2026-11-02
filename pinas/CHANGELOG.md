@@ -2,6 +2,13 @@
 
 Neueste Version oben. Das Update-Center zeigt die Abschnitte an, die neuer sind als die installierte Version.
 
+## 1.2.7
+- Neuer Abschalt-Timer im Dashboard (nur für Administratoren): PiNAS schaltet sich zu festen Zeiten ab und per eingebauter Uhr des Raspberry Pi 5 wieder ein – wählbar nach Wochentagen
+- Abschalt-Timer: 5 Minuten vorher erscheint auf jeder Seite ein Hinweis mit „Abbrechen“. Laufende Übertragungen, Updates und geöffnete Dateien am Netzlaufwerk verschieben die Abschaltung
+- Abschalt-Timer: Das Einschalten per Uhr wird einmalig im Dashboard eingerichtet und lässt sich mit einem Probelauf testen – der Pi muss dafür am Strom bleiben
+- Übertragungsfenster: Geschwindigkeit und Restzeit laufen jetzt ruhig, statt ständig zu springen
+- Übertragungsfenster: Es lässt sich an der Titelleiste verschieben und merkt sich die Stelle
+
 ## 1.2.6
 - Das Übertragungsfenster bleibt beim Wechsel auf einen anderen Reiter sichtbar – Hoch- und Herunterladen laufen dabei weiter
 - Hochladen: Dateien werden in Teilstücken übertragen, das lange Warten am Ende fällt weg. Kurze Netzwerk-Aussetzer werden automatisch überbrückt

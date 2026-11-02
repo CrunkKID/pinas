@@ -54,6 +54,10 @@ ACTIONS = {
     "write":       ("Gespeichert / geändert", "💾", "ok"),
     "read":        ("Gelesen", "👁", "off"),
     "setting":     ("Einstellung geändert", "⚙", "warn"),
+    "timer_off":   ("Abschalt-Timer: heruntergefahren", "⏻", "warn"),
+    "timer_on":    ("Abschalt-Timer: wieder eingeschaltet", "⏻", "ok"),
+    "timer_wait":  ("Abschalt-Timer: verschoben", "⏳", "warn"),
+    "timer_cancel": ("Abschalt-Timer: abgebrochen", "⏻", "off"),
 }
 
 _lock = threading.Lock()
@@ -203,6 +207,11 @@ def log(action: str, detail: str = "", size: int | None = None, username: str | 
             _resolve_later(cfg, ip)
     except Exception:  # noqa: BLE001 – das Protokoll darf nie eine Aktion des Benutzers verhindern
         current_app.logger.exception("Ereignis konnte nicht protokolliert werden")
+
+
+def log_system(cfg, action: str, detail: str = "") -> None:
+    """Ein Ereignis, das PiNAS selbst auslöst (kein Benutzer, kein Gerät)."""
+    _insert(cfg, [(time.time(), "System", action, detail, None, "", "", "PiNAS", "system")])
 
 
 def size_of(path: Path) -> int | None:
@@ -378,7 +387,8 @@ def recent(cfg, limit: int = 30, offset: int = 0, username: str = "", kind: str 
     if kind == "login":
         where.append("action IN ('login', 'login_fail', 'login_block', 'logout', 'connect')")
     elif kind == "files":
-        where.append("action NOT IN ('login', 'login_fail', 'login_block', 'logout', 'connect')")
+        where.append("action NOT IN ('login', 'login_fail', 'login_block', 'logout', 'connect', 'setting') "
+                     "AND action NOT LIKE 'timer%'")
     sql = "SELECT * FROM events" + (" WHERE " + " AND ".join(where) if where else "")
     sql += " ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?"
     try:

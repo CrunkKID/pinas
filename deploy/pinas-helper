@@ -14,6 +14,10 @@
 #   pinas-helper update-stage DATEI         (Update-Paket prüfen und bereitlegen, siehe pinas-update)
 #   pinas-helper update-apply|update-rollback|update-discard
 #   pinas-helper power shutdown|reboot|update-reboot|safe-shutdown|disk-off|disk-on|cancel
+#   pinas-helper rtc-wake SEKUNDEN          (Weckruf der Uhr, 0 = löschen)
+#   pinas-helper rtc-wake-setup             (Bootloader fürs Wecken einstellen, gilt nach dem nächsten Neustart)
+#   pinas-helper timer-notice SEKUNDEN      (Abschalt-Timer: Hinweis mit Restzeit)
+#   pinas-helper timer-run WECKSEKUNDEN wait|force  (Abschalt-Timer: Platte abmelden, herunterfahren)
 #   pinas-helper factory-reset keep|wipe    (Werkseinstellungen; wipe leert zusätzlich die Festplatte)
 #
 # Ordner-Aufteilung (PINAS_SHARED_MODE in /etc/default/pinas):
@@ -317,6 +321,74 @@ power() {
   esac
 }
 
+# ---------------------------------------------------------------- Abschalt-Timer
+
+RTC_ALARM="/sys/class/rtc/rtc0/wakealarm"
+
+# Weckruf als Abstand setzen: stimmt auch, wenn die Uhr selbst keine richtige Zeit hat
+rtc_wake() {
+  [[ -e "$RTC_ALARM" ]] || die "Dieses Gerät hat keine Uhr mit Weckfunktion."
+  echo 0 > "$RTC_ALARM"
+  if (( $1 > 0 )); then echo "+$1" > "$RTC_ALARM"; fi
+}
+
+# Bootloader: Nur so schaltet der Pi 5 beim Herunterfahren ganz ab und lässt sich von der Uhr wecken.
+# Ändert ausschließlich diese beiden Werte. Wirksam wird es erst beim nächsten Neustart.
+rtc_wake_setup() {
+  [[ -e "$RTC_ALARM" ]] && grep -qa "Raspberry Pi 5" /proc/device-tree/model \
+    || die "Einschalten per Uhr gibt es nur auf dem Raspberry Pi 5."
+  command -v rpi-eeprom-config >/dev/null || die "Das Programm rpi-eeprom-config fehlt."
+  local tmp out rc=0
+  tmp="$(mktemp)"
+  if ! rpi-eeprom-config > "$tmp" || [[ ! -s "$tmp" ]]; then
+    rm -f "$tmp"
+    die "Die Bootloader-Einstellungen ließen sich nicht lesen."
+  fi
+  sed -i -e '/^POWER_OFF_ON_HALT=/d' -e '/^WAKE_ON_GPIO=/d' "$tmp"
+  # Oben in den allgemeinen Teil, nicht in einen Abschnitt, der nur für bestimmte Geräte gilt
+  if [[ "$(head -n1 "$tmp")" == "[all]" ]]; then
+    sed -i '1a POWER_OFF_ON_HALT=1\nWAKE_ON_GPIO=0' "$tmp"
+  else
+    sed -i '1i POWER_OFF_ON_HALT=1\nWAKE_ON_GPIO=0' "$tmp"
+  fi
+  out="$(rpi-eeprom-config --apply "$tmp" 2>&1)" || rc=$?
+  rm -f "$tmp"
+  (( rc == 0 )) || die "Einrichten fehlgeschlagen: $out"
+}
+
+timer_notice() {
+  mkdir -p "$RUN_DIR"
+  printf '{"action": "timer-shutdown", "at": %s}\n' "$(( $(date +%s) + $1 ))" > "$POWER_STATE"
+  chmod 0644 "$POWER_STATE"
+}
+
+# Liegen die NAS-Daten auf einer eigenen Platte (nicht auf der SD-Karte)?
+data_on_own_disk() {
+  mountpoint -q "$DATA" || return 1
+  local src disk
+  src="$(findmnt -no SOURCE "$DATA")"
+  disk="$(lsblk -no PKNAME "$src" | head -n1)"
+  [[ "/dev/${disk:-${src#/dev/}}" != "/dev/$(lsblk -no PKNAME "$(findmnt -no SOURCE /)")" ]]
+}
+
+timer_run() {
+  local wake="$1" mode="$2"
+  # Niemals mitten in einem Update, beim Einrichten einer Platte oder beim Zurücksetzen
+  if pgrep -f 'pinas-update|pinas-helper (use-disk|set-layout|factory-reset)' >/dev/null; then
+    die "Gerade läuft ein Update oder die Festplatte wird eingerichtet."
+  fi
+  if [[ "$mode" == "wait" ]]; then
+    local locks
+    locks="$(smbstatus -L 2>/dev/null || true)"
+    if grep -qE '^[0-9]+[[:space:]]' <<< "$locks"; then
+      die "Am Netzlaufwerk sind noch Dateien geöffnet."
+    fi
+  fi
+  rtc_wake "$wake"  # zuerst: schlägt es fehl, bleibt das NAS an und erreichbar
+  if data_on_own_disk; then disk_off; fi
+  schedule_power poweroff 5 timer-shutdown
+}
+
 # ---------------------------------------------------------------- Werkseinstellungen
 
 STATE_DIR="/var/lib/pinas"
@@ -413,6 +485,22 @@ case "$cmd" in
   set-layout)
     [[ $# -eq 2 ]] || die "Aufruf: pinas-helper set-layout folder|root"
     set_layout "$2"
+    exit 0
+    ;;
+  rtc-wake|timer-notice)
+    [[ $# -eq 2 && "$2" =~ ^[0-9]{1,7}$ ]] || die "Aufruf: pinas-helper $cmd SEKUNDEN"
+    if [[ "$cmd" == "rtc-wake" ]]; then rtc_wake "$2"; else timer_notice "$2"; fi
+    exit 0
+    ;;
+  rtc-wake-setup)
+    [[ $# -eq 1 ]] || die "Aufruf: pinas-helper rtc-wake-setup"
+    rtc_wake_setup
+    exit 0
+    ;;
+  timer-run)
+    [[ $# -eq 3 && "$2" =~ ^[0-9]{1,7}$ && ( "$3" == "wait" || "$3" == "force" ) ]] \
+      || die "Aufruf: pinas-helper timer-run WECKSEKUNDEN wait|force"
+    timer_run "$2" "$3"
     exit 0
     ;;
   samba-config)

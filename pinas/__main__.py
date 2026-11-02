@@ -26,6 +26,8 @@ def main() -> None:
     start_reboot_watch(app)
     from .events import start_importer
     start_importer(app)
+    from .powertimer import start as start_powertimer
+    start_powertimer(app)
     host, port = app.config["HOST"], app.config["PORT"]
     # Upload-Zwischendateien auf die NAS-Platte statt auf die SD-Karte
     tmp = app.config["DATA_DIR"] / ".tmp"

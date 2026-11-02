@@ -40,18 +40,22 @@
     return;
   }
 
-  const fmtRate = (bps) => (bps < 1024 * 1024 ? `${Math.round(bps / 1024)} KB/s`
-                                              : `${(bps / 1024 / 1024).toFixed(1).replace(".", ",")} MB/s`);
-  const fmtMbit = (bps) => {
-    const mbit = (bps * 8) / 1e6;
-    return `${mbit < 100 ? mbit.toFixed(1).replace(".", ",") : Math.round(mbit)} Mbit/s`;
-  };
+  // Gerundet, damit die Anzeige ruhig bleibt: unter 10 mit einer Nachkommastelle, ab 100 in Fünferschritten
+  const roundShort = (n) => (n < 10 ? n.toFixed(1).replace(".", ",") : n < 100 ? Math.round(n) : Math.round(n / 5) * 5);
+  const fmtRate = (bps) => (bps < 1024 * 1024 ? `${Math.round(bps / 1024)} KB/s` : `${roundShort(bps / 1024 / 1024)} MB/s`);
+  const fmtMbit = (bps) => `${roundShort((bps * 8) / 1e6)} Mbit/s`;
 
+  // Restzeit in groben Schritten, wie im Windows-Kopierdialog
   function formatTime(secs) {
-    secs = Math.round(secs);
-    if (secs < 60) return `${secs} s`;
-    const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
-    return h ? `${h} Std ${m} Min` : `${m}:${String(s).padStart(2, "0")} Min`;
+    if (secs < 10) return "wenige Sekunden";
+    if (secs < 60) return `ca. ${Math.round(secs / 5) * 5} s`;
+    if (secs < 600) {
+      const halves = Math.round(secs / 30);
+      return `ca. ${Math.floor(halves / 2)}:${halves % 2 ? "30" : "00"} Min`;
+    }
+    if (secs < 3600) return `ca. ${Math.round(secs / 60)} Min`;
+    const mins = Math.round(secs / 300) * 5;
+    return `ca. ${Math.floor(mins / 60)} Std ${mins % 60} Min`;
   }
 
   function formatSize(bytes) {
@@ -119,12 +123,58 @@
   }
 
   // ---------- Fenster ----------
+  const SPEED_WINDOW = 6000;  // Geschwindigkeit: Mittelwert über so viele Millisekunden
+  const GRAPH_POINTS = 300;
   const stack = document.createElement("div");
   stack.className = "xfer-stack";
   document.body.append(stack);
   const SMALL_KEY = "pinas.uebertragung.klein";
   let small = false;
   try { small = localStorage.getItem(SMALL_KEY) === "1"; } catch {}
+
+  // Verschieben an der Titelleiste (Maus und Finger). pos ist die gewünschte Stelle; wird das Fenster
+  // zu groß dafür, rückt es nur so weit wie nötig und kommt wieder zurück, sobald es kleiner wird.
+  const POS_KEY = "pinas.uebertragung.position";
+  const EDGE = 8;
+  let pos = { right: 16, bottom: 16 };
+  try {
+    const saved = JSON.parse(localStorage.getItem(POS_KEY) || "{}");
+    if (Number.isFinite(saved.right) && Number.isFinite(saved.bottom)) pos = saved;
+  } catch {}
+
+  function placeStack() {
+    const r = stack.getBoundingClientRect();
+    const fit = (want, room) => Math.max(EDGE, Math.min(want, room - EDGE));
+    const room = document.documentElement;  // ohne Bildlaufleiste
+    const placed = { right: fit(pos.right, room.clientWidth - r.width), bottom: fit(pos.bottom, room.clientHeight - r.height) };
+    stack.style.right = placed.right + "px";
+    stack.style.bottom = placed.bottom + "px";
+    return placed;
+  }
+  placeStack();
+  addEventListener("resize", placeStack);
+  new ResizeObserver(placeStack).observe(stack);
+
+  stack.addEventListener("pointerdown", (e) => {
+    if (e.button || !e.target.closest(".xfer header") || e.target.closest("button")) return;
+    e.preventDefault();
+    const start = { x: e.clientX, y: e.clientY, ...placeStack() };
+    stack.setPointerCapture(e.pointerId);  // auch über dem Rahmen der Seite weiter mitbekommen
+    const move = (ev) => {
+      pos = { right: start.right - (ev.clientX - start.x), bottom: start.bottom - (ev.clientY - start.y) };
+      placeStack();
+    };
+    const up = () => {
+      stack.removeEventListener("pointermove", move);
+      stack.removeEventListener("pointerup", up);
+      stack.removeEventListener("pointercancel", up);
+      pos = placeStack();
+      try { localStorage.setItem(POS_KEY, JSON.stringify(pos)); } catch {}
+    };
+    stack.addEventListener("pointermove", move);
+    stack.addEventListener("pointerup", up);
+    stack.addEventListener("pointercancel", up);
+  });
 
   // onCancel bricht die Übertragung ab
   function transferWindow(title, onCancel) {
@@ -150,11 +200,34 @@
     const titleEl = $(".xfer-title"), pctEl = $(".xfer-pct"), barEl = $(".xfer-bar span"), graph = $(".xfer-graph");
     const cancelBtn = $(".xfer-cancel");
     stack.append(w);
+    placeStack();
 
-    let loaded = 0, total = 0, speed = 0, last = null, raf = 0, state = "run", saving = false;
-    const points = [];  // Geschwindigkeitsverlauf: {x: 0…1, v: Bytes/s}
+    let loaded = 0, total = 0, speed = 0, eta = null, raf = 0, state = "run", saving = false, timer = 0;
+    let samples = [];  // Messwerte der letzten Sekunden: {t, loaded}
+    let points = [];  // Geschwindigkeitsverlauf: {x: 0…1, v: Bytes/s}
 
     const close = () => w.remove();
+
+    // Einmal pro Sekunde messen, über die letzten Sekunden gemittelt. Einzelne Meldungen kommen in Schüben
+    // (beim Hochladen wartet der Browser nach jedem Teilstück auf die Bestätigung) und sagen wenig aus.
+    function measure() {
+      if (saving) return;
+      const t = performance.now();
+      if (samples.length && loaded < samples[samples.length - 1].loaded) samples = [];  // Teilstück wird wiederholt
+      samples.push({ t, loaded });
+      while (samples.length > 2 && t - samples[0].t > SPEED_WINDOW) samples.shift();
+      const first = samples[0], secs = (t - first.t) / 1000;
+      if (secs < 1) return;
+      speed = Math.max(0, loaded - first.loaded) / secs;
+      // Die Restzeit zählt einfach herunter und wird nur neu gesetzt, wenn sie deutlich danebenliegt
+      const raw = speed > 0 ? (total - loaded) / speed : null;
+      const counted = eta === null ? null : Math.max(0, eta - 1);
+      eta = raw === null || counted === null || Math.abs(raw - counted) > Math.max(5, counted * 0.15) ? raw : counted;
+      if (!points.length) points.push({ v: speed, x: 0 });  // Kurve am linken Rand beginnen
+      points.push({ v: speed, x: total ? loaded / total : 0 });
+      if (points.length > GRAPH_POINTS) points = points.filter((_, i) => i % 2 === 0);
+      schedule();
+    }
 
     // Verlaufskurve wie im Windows-Kopierdialog: x = Fortschritt, y = Geschwindigkeit
     function draw() {
@@ -197,7 +270,7 @@
           $(".xfer-left").textContent = "gleich fertig";
         } else {
           pctEl.textContent = `${pct} % abgeschlossen`;
-          $(".xfer-left").textContent = speed ? "ca. " + formatTime((total - loaded) / speed) : "wird berechnet …";
+          $(".xfer-left").textContent = eta === null ? "wird berechnet …" : formatTime(eta);
         }
         $(".xfer-done").textContent = `${formatSize(loaded)} von ${formatSize(total)}`;
       }
@@ -206,6 +279,7 @@
     const schedule = () => { if (!raf) raf = requestAnimationFrame(render); };
 
     function end(cls, text) {
+      clearInterval(timer);
       state = cls;
       w.classList.add(cls);
       titleEl.textContent = title;
@@ -238,15 +312,9 @@
         loaded = now;
         total = all;
         saving = false;  // bei mehreren Dateien geht es mit der nächsten weiter
-        const t = performance.now();
-        if (!last) last = { loaded: now, t };
-        const secs = (t - last.t) / 1000;
-        if (secs >= 0.5) {  // Geschwindigkeit geglättet, damit die Anzeige nicht springt
-          const current = Math.max(0, now - last.loaded) / secs;
-          speed = speed ? speed * 0.7 + current * 0.3 : current;
-          last = { loaded: now, t };
-          if (!points.length) points.push({ v: speed, x: 0 });  // Kurve am linken Rand beginnen
-          points.push({ v: speed, x: all ? now / all : 0 });
+        if (!timer && state === "run") {
+          measure();
+          timer = setInterval(measure, 1000);
         }
         schedule();
       },
