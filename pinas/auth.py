@@ -1,4 +1,5 @@
 import functools
+import hashlib
 import hmac
 import secrets
 import threading
@@ -42,6 +43,16 @@ def csrf_token() -> str:
     return session["csrf"]
 
 
+def _pw_stamp(row) -> str:
+    """Fingerabdruck des Passworts im Sitzungs-Cookie: Ändert es sich, gelten alte Anmeldungen nicht mehr."""
+    return hashlib.sha256(row["pw_hash"].encode()).hexdigest()
+
+
+def keep_login() -> None:
+    """Nach dem eigenen Passwortwechsel: Dieser Browser bleibt angemeldet, alle anderen Geräte müssen sich neu anmelden."""
+    session["pw"] = _pw_stamp(users.get_user(get_db(), g.user["username"]))
+
+
 @bp.app_context_processor
 def inject():
     return {"csrf_token": csrf_token, "user": g.get("user")}
@@ -65,7 +76,8 @@ def load_user_and_check_csrf():
     uid = session.get("uid")
     if uid is not None:
         g.user = get_db().execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
-        if g.user is None:
+        if g.user is None or not hmac.compare_digest(session.get("pw", ""), _pw_stamp(g.user)):
+            g.user = None
             session.clear()
     if request.method == "POST":
         sent = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token", "")
@@ -110,6 +122,7 @@ def login():
         session.clear()
         session.permanent = True
         session["uid"] = row["id"]
+        session["pw"] = _pw_stamp(row)
         events.log("login", username=row["username"])
         nxt = request.args.get("next", "")
         # Nur relative Pfade zulassen (kein Open Redirect)
@@ -143,6 +156,7 @@ def setup():
             session.clear()
             session.permanent = True
             session["uid"] = row["id"]
+            session["pw"] = _pw_stamp(row)
             flash("Willkommen! Als Nächstes die Festplatte einrichten.", "ok")
             return redirect(url_for("disk.index"))
     return render_template("setup.html")
@@ -172,7 +186,9 @@ def account():
         else:
             try:
                 users.set_password(conn, helper(), g.user["username"], request.form.get("new", ""))
-                flash("Passwort geändert – gilt auch für das Netzlaufwerk.", "ok")
+                keep_login()
+                flash("Dein Passwort wurde geändert. Es gilt ab sofort auch für das Netzlaufwerk. "
+                      "Deine anderen Geräte wurden abgemeldet.", "ok")
                 return redirect(url_for("auth.account"))
             except users.UserError as exc:
                 flash(str(exc), "error")
