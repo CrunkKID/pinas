@@ -11,22 +11,23 @@
 {% set host = request.host.split(':')[0] %}
 <div class="card">
   <h2>Netzlaufwerk verbinden</h2>
-  <p>Windows-Explorer → Adresszeile: <code>\\{{ host }}\Gemeinsam</code>{% if has_private %} bzw. <code>\\{{ host }}\Privat</code>{% endif %}</p>
-  <p>macOS Finder → „Mit Server verbinden“: <code>smb://{{ host }}/Gemeinsam</code>{% if has_private %} bzw. <code>smb://{{ host }}/Privat</code>{% endif %}</p>
-  <p class="muted">Anmeldung mit Benutzername <b>{{ user.username }}</b> und deinem Passwort.</p>
+  <p>So öffnest du deine PiNAS-Ordner im Heimnetz direkt auf dem Computer, wie einen normalen Ordner.</p>
+  <p><b>Windows:</b> Explorer öffnen und in die Adresszeile eingeben: <code>\\{{ host }}\Gemeinsam</code>{% if has_private %} oder <code>\\{{ host }}\Privat</code>{% endif %}</p>
+  <p><b>Mac:</b> Im Finder das Menü „Gehe zu“ → „Mit Server verbinden“ wählen und eingeben: <code>smb://{{ host }}/Gemeinsam</code>{% if has_private %} oder <code>smb://{{ host }}/Privat</code>{% endif %}</p>
+  <p class="muted">Melde dich dort mit dem Benutzernamen <b>{{ user.username }}</b> und deinem PiNAS-Passwort an.</p>
 </div>
 
 <div class="card private-card">
   <h2>Privates Laufwerk</h2>
   {% if has_private %}
-  <p><span class="dot ok"></span><b>Eingerichtet.</b> Dein Laufwerk „Privat“ siehst nur du – weder andere Benutzer noch der Administrator
+  <p><span class="dot ok"></span><b>Eingerichtet.</b> Dein Laufwerk „Privat“ siehst nur du – weder andere Benutzer noch Administratoren
     können es über die Weboberfläche oder das Netzlaufwerk öffnen.</p>
   {% if space.limit %}
   <div class="bar{{ ' full' if space.pct >= 90 }}"><span style="width: {{ space.pct|round(1) }}%"></span></div>
   <p>{{ space.used|filesize }} von <b>{{ space.limit|filesize }}</b> belegt – noch {{ space.free|filesize }} frei.
-    <span class="muted">Mehr Platz kann dir der Administrator geben.</span></p>
+    <span class="muted">Der Papierkorb zählt mit. Mehr Platz kann ein Administrator freigeben.</span></p>
   {% else %}
-  <p>{{ space.used|filesize }} belegt – <b>ohne Begrenzung</b>.</p>
+  <p>{{ space.used|filesize }} belegt – <b>ohne Begrenzung</b>. <span class="muted">Der Papierkorb zählt mit.</span></p>
   {% endif %}
   <form method="post" action="{{ url_for('auth.private_drive') }}"
         data-confirm="„Privat“ verschwindet aus der Weboberfläche und dem Netzlaufwerk. Deine Dateien darin werden NICHT gelöscht und sind wieder da, sobald du es erneut einrichtest."
@@ -36,7 +37,7 @@
     <button class="btn-sm">Privates Laufwerk ausschalten</button>
   </form>
   {% else %}
-  <p>Du nutzt bisher nur das gemeinsame Laufwerk „Gemeinsam“. Möchtest du zusätzlich einen eigenen Bereich,
+  <p>Du nutzt bisher nur das Laufwerk „Gemeinsam“, das alle Benutzer sehen. Möchtest du zusätzlich einen eigenen Bereich,
     den nur du sehen kannst? Dann richte dein privates Laufwerk „Privat“ ein.</p>
   <form method="post" action="{{ url_for('auth.private_drive') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -48,8 +49,8 @@
 
 <div class="card app-card" id="app-card">
   <h2>📱 PiNAS als App</h2>
-  <p>Leg PiNAS als App auf den Startbildschirm deines Handys oder Tablets: eigenes Symbol, öffnet im Vollbild
-    ohne Adressleiste – ganz ohne App Store.</p>
+  <p>Installiere PiNAS als App auf deinem Handy, Tablet oder PC: mit eigenem Symbol und ohne Adressleiste –
+    ganz ohne App Store.</p>
   <p class="app-installed" hidden><span class="dot ok"></span><b>Du nutzt PiNAS gerade als App.</b></p>
   <p class="app-native" hidden><a class="button" href="pinasapp://verbindung">Anderes PiNAS verbinden</a></p>
   <div class="app-install" hidden>
@@ -59,8 +60,10 @@
     <details class="app-ios">
       <summary><b>iPhone / iPad</b> (Safari)</summary>
       <ol>
+        <li>Am besten zuerst einmal die <a href="{{ url_for('tls.index') }}">sichere Verbindung einrichten</a> (Zertifikat installieren).</li>
         <li>Diese Seite in <b>Safari</b> öffnen.</li>
-        <li>Unten auf <b>Teilen</b> tippen (Quadrat mit Pfeil nach oben).</li>
+        <li>Auf <b>Teilen</b> tippen (Quadrat mit Pfeil nach oben). Das Symbol ist beim iPhone meist unten, beim iPad oben rechts,
+          manchmal auch hinter <b>…</b> versteckt.</li>
         <li><b>„Zum Home-Bildschirm“</b> wählen → <b>Hinzufügen</b>.</li>
       </ol>
     </details>
@@ -69,34 +72,37 @@
       <ol>
         <li>Zuerst einmal die <a href="{{ url_for('tls.index') }}">sichere Verbindung einrichten</a> (Zertifikat installieren) –
           ohne sie bietet Android die App nicht an.</li>
-        <li>Oben rechts auf <b>⋮</b> tippen → <b>„App installieren“</b> bzw. <b>„Zum Startbildschirm hinzufügen“</b>.</li>
+        <li>Das Browser-Menü öffnen (<b>⋮</b> oder <b>…</b>) → <b>„App installieren“</b> bzw. <b>„Zum Startbildschirm hinzufügen“</b>.</li>
       </ol>
     </details>
     <details class="app-desktop">
       <summary><b>PC / Mac</b> (Chrome, Edge, Brave)</summary>
       <ol>
+        <li>Zuerst einmal die <a href="{{ url_for('tls.index') }}">sichere Verbindung einrichten</a> (Zertifikat installieren) –
+          ohne sie bietet der Browser die App nicht an.</li>
         <li>In der Adressleiste rechts auf das Symbol <b>„App installieren“</b> klicken (Bildschirm mit Pfeil).</li>
-        <li>PiNAS öffnet sich dann wie ein eigenes Programm, auch über das Startmenü.</li>
+        <li>PiNAS öffnet sich dann wie ein eigenes Programm. Du findest es auch im Startmenü bzw. beim Mac unter „Programme“.</li>
       </ol>
     </details>
   </div>
-  <p class="muted">Die App funktioniert im Heimnetz. Bist du unterwegs, zeigt sie „Gerade nicht erreichbar“ und
-    verbindet sich wieder, sobald du zu Hause bist.</p>
+  <p class="muted">Die App funktioniert nur im Heimnetz. Unterwegs zeigt sie „Gerade nicht erreichbar“ und
+    verbindet sich von selbst wieder, sobald du zu Hause bist.</p>
 </div>
 
 <div class="card">
   <h2>Sichere Verbindung</h2>
-  <p>Warnt dein Browser oder blockiert er Downloads? Installiere einmal pro Gerät das PiNAS-Zertifikat.</p>
+  <p>Warnt dein Browser vor PiNAS oder blockiert er Downloads? Dann installiere einmal pro Gerät das PiNAS-Zertifikat.</p>
   <a class="button" href="{{ url_for('tls.index') }}">Anleitung &amp; Zertifikat</a>
 </div>
 
 <h2>Passwort ändern</h2>
+<p class="muted">Das neue Passwort gilt für die Anmeldung hier und für das Netzlaufwerk. Deine anderen Geräte werden dabei abgemeldet.</p>
 <form method="post" class="card form-grid">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <label>Aktuelles Passwort<input name="current" type="password" autocomplete="current-password" required></label>
-  <label>Neues Passwort<input name="new" type="password" minlength="8" autocomplete="new-password" required></label>
-  <label>Wiederholen<input name="confirm" type="password" minlength="8" autocomplete="new-password" required></label>
-  <button class="primary">Ändern</button>
+  <label>Neues Passwort (mindestens 8 Zeichen)<input name="new" type="password" minlength="8" autocomplete="new-password" required></label>
+  <label>Neues Passwort wiederholen<input name="confirm" type="password" minlength="8" autocomplete="new-password" required></label>
+  <button class="primary">Passwort ändern</button>
 </form>
 {% endblock %}
 {% block scripts %}
@@ -130,7 +136,7 @@
       if (choice.outcome === "accepted") {
         card.querySelector(".app-install").hidden = true;
         card.querySelector(".app-installed").hidden = false;
-        card.querySelector(".app-installed b").textContent = "PiNAS ist als App installiert – du findest sie auf dem Startbildschirm.";
+        card.querySelector(".app-installed b").textContent = "PiNAS ist als App installiert – du findest sie auf dem Startbildschirm bzw. im Startmenü.";
       }
       window.pinasInstall = null;
     });
