@@ -38,6 +38,9 @@ html { -webkit-text-size-adjust: 100%; }
   linear-gradient(var(--accent) 0 44%, transparent 44% 56%, var(--accent) 56%); }
 .usermenu { display: flex; align-items: center; gap: .75rem; font-size: .9rem; color: var(--muted); }
 .usermenu a { text-decoration: none; } .usermenu a:hover { color: var(--text); }
+/* Datum und Uhrzeit des Pi in der Kopfzeile */
+.header-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ht-clock { color: var(--text); font-weight: 600; }
 /* Herunterfahren/Neustart in der Kopfzeile (nur Admins) */
 .header-power { display: flex; gap: .35rem; padding-left: .75rem; border-left: 1px solid var(--border); }
 .header-power .btn-sm { display: inline-flex; align-items: center; gap: .35rem; white-space: nowrap; }
@@ -518,14 +521,20 @@ body:not(.dash-edit) [data-tile][data-off] { display: none; }
   .grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 }
 
+/* Schmales Handy mit Ein/Aus-Knöpfen: Der Benutzer steht auch unter „Konto“, das Logo bleibt */
+@media (max-width: 480px) { .usermenu:has(.header-power) > a { display: none; } }
+@media (max-width: 400px) { .inner:has(.header-power) .brand-name { display: none; } }
+
 /* Smartphone */
 @media (max-width: 640px) {
   .hide-sm { display: none; }
   .container { padding-top: 1.25rem; padding-bottom: 3rem; }
   .site-header .inner { min-height: 56px; }
   .brand { font-size: 1.15rem; }
-  .usermenu .uname { display: none; }
-  .usermenu { gap: .5rem; }
+  .usermenu .uname, .ht-date { display: none; }
+  .brand { flex: none; }
+  .usermenu { gap: .5rem; min-width: 0; }
+  .usermenu > a { max-width: 7rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .header-power { padding-left: .5rem; gap: .25rem; }
   .subnav a { padding: .7rem .7rem; }
   .hero { padding: 1.5rem 0 1.3rem; }

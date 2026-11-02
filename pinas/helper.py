@@ -3,6 +3,8 @@ import logging
 import os
 import subprocess
 
+from . import crashlog
+
 log = logging.getLogger(__name__)
 
 
@@ -23,10 +25,18 @@ class SystemHelper:
         try:
             res = subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=timeout)
         except (OSError, subprocess.TimeoutExpired) as exc:
+            self._note_failure(args, str(exc))
             raise HelperError(f"Hilfsskript konnte nicht ausgeführt werden: {exc}") from exc
         if res.returncode != 0:
+            self._note_failure(args, f"Exit-Code {res.returncode}: {res.stderr.strip()}")
             raise HelperError(res.stderr.strip() or f"Hilfsskript-Fehler ({res.returncode})")
         return res.stdout
+
+    @staticmethod
+    def _note_failure(args: tuple, text: str) -> None:
+        # Nur Warnung: Oft ist es eine erwartete Absage („Festplatte wird noch benutzt“). stdin (Passwörter) nie
+        crashlog.record("helper", f"Systembefehl „{args[0]}“ hat nicht geklappt", text, level="warn",
+                        context={"argumente": " ".join(args[1:])}, key=f"helper|{args[0]}|{text}")
 
     def add_user(self, username: str, password: str) -> None:
         self._run("add-user", username, stdin=password + "\n")
@@ -76,6 +86,10 @@ class SystemHelper:
         """Abschalt-Timer: Festplatte abmelden, Weckruf setzen, herunterfahren.
         force: auch wenn am Netzlaufwerk noch Dateien geöffnet sind."""
         self._run("timer-run", str(wake_seconds), "force" if force else "wait", timeout=120)
+
+    def crash_report_clear(self) -> None:
+        """Den Fehlerbericht auf der SD-Karte (Boot-Partition) löschen."""
+        self._run("crash-report", "clear")
 
     def factory_reset(self, wipe: bool) -> None:
         """Startet das Zurücksetzen im Hintergrund; wipe=True leert zusätzlich die Festplatte."""

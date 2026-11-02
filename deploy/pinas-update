@@ -298,7 +298,10 @@ def run(source_arg: str) -> int:
                 (UPD / "staged.json").unlink(missing_ok=True)
             shutil.rmtree(WORK, ignore_errors=True)
             what = "Zurück auf" if is_rollback else "Update auf"
-            # Nach erfolgreicher Installation das ganze System frisch starten (Betriebszeit wird vorher gesichert)
+            # Letzter Schritt: Erst wenn alles installiert ist und die neue Weboberfläche antwortet, alles auf die
+            # SD-Karte schreiben und das ganze System frisch starten (Betriebszeit wird vorher gesichert)
+            log.flush()
+            os.sync()
             reboot = subprocess.run(["/usr/local/sbin/pinas-helper", "power", "update-reboot"],
                                     stdout=log, stderr=subprocess.STDOUT).returncode == 0
             write_status(state="done", version=version, previous=old, reboot=reboot,

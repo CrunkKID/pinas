@@ -21,8 +21,15 @@
       <strong>{{ release.version }}</strong>
       <small>{% if release.newer %}<span class="dot ok"></span><b>Neue Version verfügbar</b>{% else %}<span class="dot off"></span>Du bist auf dem neuesten Stand{% endif %}
         · geprüft {{ release.checked }}</small>
+      {% if release.newer and release.notes and not staged %}
+      <div class="upd-notes">
+        <h3>Neu in {{ release.version }}</h3>
+        <ul>{% for item in release.notes %}<li>{{ item }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
     {% elif release.error %}
       <small class="upd-error">{{ release.error }}</small>
+      <small>geprüft {{ release.checked }}</small>
     {% else %}
       <small>Fragt bei GitHub nach, ob es eine neuere Version gibt. Es wird nichts automatisch installiert.</small>
     {% endif %}
@@ -34,7 +41,7 @@
       {% if release.newer and not staged %}
       <form method="post" action="{{ url_for('updates.download') }}" class="inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn-sm primary">Version {{ release.version }} herunterladen</button>
+        <button class="btn-sm primary">Version {{ release.version }} herunterladen und prüfen</button>
       </form>
       {% endif %}
     </div>
@@ -168,11 +175,12 @@
 <details class="card upd-help">
   <summary>So kommst du an ein Update</summary>
   <ol>
-    <li>Auf GitHub im Repository unter <b>Actions → „PiNAS-Update bauen“ → „Run workflow“</b> starten (dauert unter einer Minute).</li>
-    <li>Im fertigen Lauf unten unter <b>Artifacts</b> die Datei <code>pinas-update-…</code> herunterladen.</li>
-    <li>Die ZIP-Datei <b>so wie sie ist</b> oben auswählen oder hineinziehen → <b>Prüfen</b> → <b>Jetzt installieren</b>.</li>
+    <li>Oben auf <b>Nach Updates suchen</b> klicken.</li>
+    <li>Gibt es eine neue Version: <b>herunterladen und prüfen</b>.</li>
+    <li>Danach <b>Jetzt installieren</b>. Vorher wird nichts installiert.</li>
   </ol>
-  <p class="muted">Wird auf GitHub ein Release (z. B. <code>v1.3.0</code>) veröffentlicht, findet „Nach Updates suchen“ das Paket auch direkt.</p>
+  <p class="muted">Ohne Internet am PiNAS: Auf einem anderen Gerät unter <code>github.com/CrunkKID/pinas/releases</code> die Datei
+    <code>pinas-update-….tar.gz</code> herunterladen und oben auswählen oder hineinziehen → <b>Prüfen</b> → <b>Jetzt installieren</b>.</p>
 </details>
 {% endblock %}
 {% block scripts %}
@@ -222,7 +230,9 @@
       const elapsed = Math.max(0, Date.now() / 1000 - start);
       document.getElementById("upd-bar").style.width = Math.min(95, 2 + (elapsed / estimate) * 93) + "%";
       const left = Math.round(estimate - elapsed);
-      document.getElementById("upd-eta").textContent = left > 60 ? `Noch ca. ${Math.ceil(left / 60)} Minuten`
+      document.getElementById("upd-eta").textContent = window.updOffline
+        ? "PiNAS startet gerade seine Dienste neu – kein Fehler, die Seite verbindet sich von selbst wieder …"
+        : left > 60 ? `Noch ca. ${Math.ceil(left / 60)} Minuten`
         : left > 0 ? `Noch ca. ${left} Sekunden` : "Gleich fertig …";
       setTimeout(tick, 1000);
     };
@@ -249,8 +259,10 @@
     const poll = async () => {
       try {
         const r = await fetch("{{ url_for('updates.api_status') }}", { cache: "no-store", credentials: "same-origin" });
-        if (r.ok && (await r.json()).state !== "running") { location.reload(); return; }
-      } catch {}
+        window.updOffline = !r.ok;
+        // Umgeleitet: Die neue Version verlangt eine neue Anmeldung – sonst bliebe die Seite einfach stehen
+        if (r.redirected || (r.ok && (await r.json()).state !== "running")) { location.reload(); return; }
+      } catch { window.updOffline = true; }
       setTimeout(poll, 4000);
     };
     setTimeout(poll, 4000);

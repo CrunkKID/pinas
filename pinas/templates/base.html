@@ -21,8 +21,12 @@
   {% if user %}
   <header class="site-header">
     <div class="inner">
-      <a class="brand" href="{{ url_for('index') }}"><span class="logo"></span>PiNAS</a>
+      <a class="brand" href="{{ url_for('index') }}"><span class="logo"></span><span class="brand-name">PiNAS</span></a>
       <div class="usermenu">
+        {# Zeit des Pi, nicht die des Geräts: Danach läuft auch der Abschalt-Timer. countdown.js zählt sie weiter #}
+        {% if pi_now %}
+        <time class="header-time" data-now="{{ pi_now.ms }}" data-tz="{{ pi_now.tz }}" title="Datum und Uhrzeit des PiNAS"><span class="ht-date">{{ pi_now.date }} · </span><span class="ht-clock">{{ pi_now.time }}</span></time>
+        {% endif %}
         <a href="{{ url_for('auth.account') }}"><span class="uname">Angemeldet als </span><b>{{ user.username }}</b></a>
         {% if user.is_admin and power and not power.pending %}
         <div class="header-power" role="group" aria-label="PiNAS ausschalten oder neu starten">

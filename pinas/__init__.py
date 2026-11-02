@@ -3,9 +3,9 @@ import secrets
 from datetime import timedelta
 from pathlib import Path
 
-from flask import Flask, redirect, url_for
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 
-from . import db
+from . import crashlog, db
 from .config import load_config, storage
 from .helper import SystemHelper
 from .history import History
@@ -27,6 +27,7 @@ def _load_secret(path: Path) -> str:
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config.update(load_config())
+    crashlog.setup(app.config["DB_PATH"].parent)
     app.config.update(
         SECRET_KEY=_load_secret(app.config["SECRET_FILE"]),
         SESSION_COOKIE_HTTPONLY=True,
@@ -65,6 +66,18 @@ def create_app() -> Flask:
     def index():
         # Ohne eingerichtetes „Privat“ leitet files.browse weiter nach „Gemeinsam“
         return redirect(url_for("files.browse", root="privat"))
+
+    @app.errorhandler(500)
+    def server_error(exc):
+        err_id = crashlog.record_exception(getattr(exc, "original_exception", None) or exc)
+        text = "PiNAS hat einen Fehler aufgeschrieben. Bitte versuch es noch einmal."
+        if request.path.startswith("/api/") or request.accept_mimetypes.best == "application/json":
+            return jsonify(error=text, fehler=err_id), 500
+        try:
+            return render_template("error.html", err_id=err_id), 500
+        except Exception:  # noqa: BLE001 – die Fehlerseite selbst darf nicht scheitern
+            crashlog.record("web", "Die Fehlerseite konnte nicht angezeigt werden")
+            return f"<!doctype html><meta charset=utf-8><title>Fehler</title><p>{text} (Nummer {err_id})</p>", 500
 
     @app.template_filter("filesize")
     def filesize(num):

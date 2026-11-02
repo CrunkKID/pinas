@@ -1,0 +1,19 @@
+/* Fehlerprotokoll (Dashboard-Kachel „Fehlerprotokoll“ und eigene Seite) */
+.err-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.err-inside { margin-top: 1rem; font-size: .9rem; }
+.err-inside summary, .err-entry summary { cursor: pointer; }
+.err-state td:first-child { white-space: nowrap; }
+.err-entry { padding: .6rem 0; border-top: 1px solid var(--border); }
+.err-entry:first-of-type { border-top: 0; }
+.err-entry summary { line-height: 1.4; }
+.err-title { font-weight: 600; }
+.err-meta { color: var(--muted); font-size: .85rem; }
+.err-entry summary .err-meta { display: block; margin-left: 1.1rem; }
+.err-hint { margin: .6rem 0 0; }
+.err-text { margin: .6rem 0 0; word-break: break-word; }
+.err-entry p.err-meta { margin: .4rem 0 0; }
+.err-trace { margin: .6rem 0 0; padding: .6rem; max-height: 22rem; overflow: auto; font-size: .78rem; line-height: 1.35;
+  background: var(--bg, transparent); border: 1px solid var(--border); border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
+.err-note { margin: .75rem 0; font-size: .85rem; }
+.err-tile { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .5rem 1rem; }
+.err-tile h2 { margin-bottom: .5rem; }

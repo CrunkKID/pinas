@@ -258,6 +258,26 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
 </div>
 </section>
 {% endif %}
+{% if errors %}
+<link rel="stylesheet" href="{{ url_for('static', filename='errors.css') }}">
+<section {{ tile('errors', 'Fehlerprotokoll') }}>
+<div class="err-tile">
+  <h2>Fehlerprotokoll</h2>
+  <a class="btn-sm" href="{{ url_for('dashboard.errors_page') }}">Fehlerprotokoll ansehen →</a>
+</div>
+<div class="card">
+  {% if errors.errors %}
+  <p><span class="dot bad"></span><b>{{ errors.errors }} Fehler</b> in den letzten {{ errors.days }} Tagen{% if errors.warnings %}, dazu {{ errors.warnings }} {{ 'Hinweis' if errors.warnings == 1 else 'Hinweise' }}{% endif %}.</p>
+  <p class="muted">Zuletzt: {{ errors.last.title }} ({{ errors.last.time }})</p>
+  {% elif errors.warnings %}
+  <p><span class="dot warn"></span><b>Keine Fehler</b>, aber {{ errors.warnings }} {{ 'Hinweis' if errors.warnings == 1 else 'Hinweise' }} in den letzten {{ errors.days }} Tagen.</p>
+  <p class="muted">Zuletzt: {{ errors.last.title }} ({{ errors.last.time }})</p>
+  {% else %}
+  <p><span class="dot ok"></span><b>Keine Fehler</b> in den letzten {{ errors.days }} Tagen.</p>
+  {% endif %}
+</div>
+</section>
+{% endif %}
 <section {{ tile('services', 'Dienste') }}>
 <h2>Dienste</h2>
 <div class="card">

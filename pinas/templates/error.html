@@ -1,0 +1,25 @@
+<!doctype html>
+{# Bewusst ohne base.html: Diese Seite muss auch dann erscheinen, wenn das Menü selbst der Fehler ist #}
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fehler · PiNAS</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="container">
+    <div class="card">
+      <h1>Da ist etwas schiefgelaufen</h1>
+      <p>PiNAS konnte diese Seite wegen eines Fehlers nicht anzeigen. Der Fehler ist aufgeschrieben{% if err_id %}
+        (Fehlernummer <code>{{ err_id }}</code>){% endif %}.</p>
+      <p>Geh zurück und versuch es noch einmal. Tritt der Fehler wieder auf, kann ein Administrator
+        den Fehlerbericht herunterladen.</p>
+      <p>
+        <a class="btn-sm" href="{{ url_for('index') }}">Zur Startseite</a>
+        {% if user and user.is_admin %}<a class="btn-sm" href="{{ url_for('dashboard.errors_page') }}">Zum Fehlerprotokoll</a>{% endif %}
+      </p>
+    </div>
+  </main>
+</body>
+</html>

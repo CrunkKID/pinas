@@ -132,7 +132,16 @@ echo "==> Verschlüsselte Weboberfläche (https)"
 install -m 0755 -o root -g root "$SRC/deploy/pinas-cert" /usr/local/sbin/pinas-cert
 install -m 0644 "$SRC/deploy/pinas-cert.service" /etc/systemd/system/pinas-cert.service
 install -m 0644 "$SRC/deploy/pinas-cert.timer" /etc/systemd/system/pinas-cert.timer
+NGINX_OLD="$(mktemp)"
+[[ -f /etc/nginx/sites-available/pinas ]] && cp -f /etc/nginx/sites-available/pinas "$NGINX_OLD"
 install -m 0644 "$SRC/deploy/nginx-pinas.conf" /etc/nginx/sites-available/pinas
+# Eine fehlerhafte Datei würde die Weboberfläche aussperren, deshalb im laufenden System prüfen
+# (beim Bau des Images gibt es noch kein Zertifikat, dort schlüge die Prüfung immer fehl)
+if [[ -f /etc/pinas/tls/server.crt && -s "$NGINX_OLD" ]] && ! nginx -t; then
+  echo "Neue nginx-Einstellungen fehlerhaft, die bisherigen bleiben aktiv."
+  install -m 0644 "$NGINX_OLD" /etc/nginx/sites-available/pinas
+fi
+rm -f "$NGINX_OLD"
 ln -sf /etc/nginx/sites-available/pinas /etc/nginx/sites-enabled/pinas
 rm -f /etc/nginx/sites-enabled/default
 mkdir -p /etc/systemd/system/nginx.service.d
@@ -144,6 +153,15 @@ install -m 0755 -o root -g root "$SRC/deploy/pinas-diskpower" /usr/local/sbin/pi
 install -m 0644 "$SRC/deploy/pinas-diskpower.service" /etc/systemd/system/pinas-diskpower.service
 install -m 0644 "$SRC/deploy/pinas-diskpower.timer" /etc/systemd/system/pinas-diskpower.timer
 systemctl enable pinas-diskpower.timer
+
+echo "==> Fehlerprotokoll und Notfallseite"
+# Das Systemprotokoll bleibt ab dem nächsten Neustart erhalten (nach einem Update startet PiNAS ohnehin neu)
+install -D -m 0644 "$SRC/deploy/journald-pinas.conf" /etc/systemd/journald.conf.d/90-pinas.conf
+mkdir -p /var/log/journal
+systemd-tmpfiles --create --prefix /var/log/journal 2>/dev/null || true
+install -m 0755 -o root -g root "$SRC/deploy/pinas-rescue" /usr/local/sbin/pinas-rescue
+install -m 0644 "$SRC/deploy/pinas-rescue.service" /etc/systemd/system/pinas-rescue.service
+systemctl enable pinas-rescue
 
 echo "==> Update-Center"
 # Quellen der installierten Version aufheben – daraus entsteht beim nächsten Update die Sicherung

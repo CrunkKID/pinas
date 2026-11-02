@@ -19,6 +19,8 @@
 #   pinas-helper timer-notice SEKUNDEN      (Abschalt-Timer: Hinweis mit Restzeit)
 #   pinas-helper timer-run WECKSEKUNDEN wait|force  (Abschalt-Timer: Platte abmelden, herunterfahren)
 #   pinas-helper factory-reset keep|wipe    (Werkseinstellungen; wipe leert zusätzlich die Festplatte)
+#   pinas-helper log-tail nginx|samba       (Ende des Fehlerprotokolls, für den Fehlerbericht)
+#   pinas-helper crash-report save|clear    (Fehlerbericht auf der Boot-Partition; save: Text über stdin)
 #
 # Ordner-Aufteilung (PINAS_SHARED_MODE in /etc/default/pinas):
 #   folder  „Gemeinsam“ = DATA/shared,  private Ordner in DATA/users/<name>
@@ -389,6 +391,23 @@ timer_run() {
   schedule_power poweroff 5 timer-shutdown
 }
 
+# ---------------------------------------------------------------- Fehlerprotokoll
+
+# Der Bericht liegt auf der Boot-Partition (FAT), dort lässt er sich an jedem PC lesen
+crash_report() {
+  local dir="/boot/firmware" file
+  mountpoint -q "$dir" || dir="/boot"
+  mountpoint -q "$dir" || die "Die Boot-Partition ist nicht eingehängt."
+  file="$dir/PINAS-FEHLERBERICHT.txt"
+  if [[ "$1" == "clear" ]]; then
+    rm -f "$file"
+    return 0
+  fi
+  head -c 2097152 > "$file.tmp"
+  mv -f "$file.tmp" "$file"
+  sync
+}
+
 # ---------------------------------------------------------------- Werkseinstellungen
 
 STATE_DIR="/var/lib/pinas"
@@ -445,6 +464,10 @@ factory_reset_run() {
   # (history.json) gehört zum Gerät und bleibt – wie ein Betriebsstundenzähler
   find "$STATE_DIR" -mindepth 1 ! -name history.json -delete
   install -d -m 0700 -o pinas -g pinas "$STATE_DIR" "$STATE_DIR/updates"
+  # Auch das Fehlerprotokoll und das dauerhafte Systemprotokoll nennen Benutzer und Geräte
+  rm -f /boot/firmware/PINAS-FEHLERBERICHT.txt /boot/PINAS-FEHLERBERICHT.txt || true
+  journalctl --rotate >/dev/null 2>&1 || true
+  journalctl --vacuum-time=1s >/dev/null 2>&1 || true
   rm -rf /var/lib/pinas-update/staged /var/lib/pinas-update/staged.json
   set_setting PINAS_SHARED_MODE folder
   PINAS_SHARED_MODE="folder"
@@ -501,6 +524,20 @@ case "$cmd" in
     [[ $# -eq 3 && "$2" =~ ^[0-9]{1,7}$ && ( "$3" == "wait" || "$3" == "force" ) ]] \
       || die "Aufruf: pinas-helper timer-run WECKSEKUNDEN wait|force"
     timer_run "$2" "$3"
+    exit 0
+    ;;
+  log-tail)
+    [[ $# -eq 2 ]] || die "Aufruf: pinas-helper log-tail nginx|samba"
+    case "$2" in
+      nginx) tail -n 100 /var/log/nginx/error.log 2>/dev/null || true ;;
+      samba) tail -n 100 /var/log/samba/log.smbd 2>/dev/null || true ;;
+      *) die "Unbekanntes Protokoll: $2" ;;
+    esac
+    exit 0
+    ;;
+  crash-report)
+    [[ $# -eq 2 && ( "$2" == "save" || "$2" == "clear" ) ]] || die "Aufruf: pinas-helper crash-report save|clear"
+    crash_report "$2"
     exit 0
     ;;
   samba-config)

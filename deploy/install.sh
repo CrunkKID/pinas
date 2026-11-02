@@ -13,6 +13,7 @@ systemctl daemon-reload
 /usr/local/sbin/pinas-issue
 systemctl restart smbd pinas nginx
 systemctl restart wsdd 2>/dev/null || true
+systemctl restart pinas-rescue 2>/dev/null || true
 
 IP="$(hostname -I | awk '{print $1}')"
 echo

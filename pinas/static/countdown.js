@@ -35,4 +35,35 @@
     };
     tick();
   });
+
+  // Datum und Uhrzeit des Pi in der Kopfzeile: Die Seite bringt die Zeit mit, der Browser zählt nur weiter.
+  // So fällt eine falsche Uhr am Pi auf, Abstand und Zeitzone des Geräts spielen keine Rolle.
+  const piTime = document.querySelector(".header-time");
+  if (piTime) {
+    const WEEKDAYS = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+    const pad = (n) => String(n).padStart(2, "0");
+    let offset = +piTime.dataset.now - Date.now();
+    try {
+      // Mit „Zurück“ kann die Seite aus dem Browser-Speicher kommen, ihre mitgebrachte Zeit ist dann alt
+      const back = performance.getEntriesByType("navigation")[0]?.type === "back_forward";
+      const saved = sessionStorage.getItem("pinasClockOffset");
+      if (back && saved !== null) offset = +saved;
+      else sessionStorage.setItem("pinasClockOffset", offset);
+    } catch {}
+    const date = piTime.querySelector(".ht-date");
+    const clock = piTime.querySelector(".ht-clock");
+    const paint = () => {
+      const t = new Date(Date.now() + offset + +piTime.dataset.tz * 1000);  // Felder als UTC lesen = Ortszeit des Pi
+      date.textContent = `${WEEKDAYS[t.getUTCDay()]}, ${pad(t.getUTCDate())}.${pad(t.getUTCMonth() + 1)}.${t.getUTCFullYear()} · `;
+      clock.textContent = `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}`;
+      return t;
+    };
+    const tick = () => {
+      const t = paint();
+      setTimeout(tick, 60000 - t.getUTCSeconds() * 1000 - t.getUTCMilliseconds());
+    };
+    tick();
+    // Nach dem Aufwachen (Handy, Laptop) gleich richtig anzeigen, die Zeitgeber standen still
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) paint(); });
+  }
 })();

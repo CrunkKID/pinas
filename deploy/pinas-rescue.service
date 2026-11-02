@@ -1,0 +1,20 @@
+[Unit]
+Description=PiNAS Notfallseite und Fehlerwaechter
+After=network.target
+
+[Service]
+Type=simple
+User=pinas
+Group=pinas
+Environment=PINAS_STATE=/var/lib/pinas
+# Enthält PINAS_DATA
+EnvironmentFile=/etc/default/pinas
+ExecStart=/usr/local/sbin/pinas-rescue serve
+Restart=always
+RestartSec=5
+UMask=0007
+Nice=5
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

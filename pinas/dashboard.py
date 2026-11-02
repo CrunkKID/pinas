@@ -10,9 +10,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
-from flask import Blueprint, current_app, flash, g, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Response, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
-from . import events, powertimer, transfers
+from . import crashlog, events, powertimer, transfers
 from .auth import admin_required, helper, login_required
 from .db import get_db
 from .helper import HelperError
@@ -372,10 +372,21 @@ def power_state() -> dict:
     return state
 
 
+_WEEKDAYS = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+
+
+def pi_now() -> dict:
+    """Datum und Uhrzeit des Pi für die Kopfzeile; ms und tz (Sekunden zu UTC) zum Weiterzählen im Browser."""
+    now = time.time()
+    t = time.localtime(now)
+    return {"ms": int(now * 1000), "tz": t.tm_gmtoff or 0, "time": f"{t.tm_hour:02}:{t.tm_min:02}",
+            "date": f"{_WEEKDAYS[t.tm_wday]}, {t.tm_mday:02}.{t.tm_mon:02}.{t.tm_year}"}
+
+
 @bp.app_context_processor
 def inject_power():
-    # Für die Ein/Aus-Knöpfe in der Kopfzeile und den Herunterfahr-Hinweis auf jeder Seite
-    return {"power": power_state()} if g.get("user") else {}
+    # Für die Kopfzeile (Ein/Aus-Knöpfe, Uhrzeit) und den Herunterfahr-Hinweis auf jeder Seite
+    return {"power": power_state(), "pi_now": pi_now()} if g.get("user") else {}
 
 
 # Knöpfe oben rechts: URL-Teil → (Helper-Aktion, Meldung danach)
@@ -414,7 +425,7 @@ def power(action):
 
 
 # Kacheln und Bereiche des Dashboards in der Standard-Reihenfolge
-TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "power", "timer", "events", "services", "devices"]
+TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "power", "timer", "events", "errors", "services", "devices"]
 
 
 def layout() -> dict:
@@ -566,6 +577,64 @@ def api_events():
 EVENTS_IN_TILE = 15
 
 
+# Was der Benutzer selbst tun kann, passend zur Art des Fehlers
+_ERROR_HINTS = {
+    "power": "Das liegt fast immer am Netzteil. Der Pi 5 mit Festplatte braucht das offizielle 5-V-/5-A-Netzteil. "
+             "Dateien können sonst beschädigt werden.",
+    "reboot": "Das passiert bei einem Stromausfall, wenn der Stecker gezogen wird oder wenn der Pi abstürzt. "
+              "Kommt es öfter vor, schick den Fehlerbericht.",
+    "disk": "Die Festplatte oder ihre Verbindung macht Probleme. Prüf das USB-Kabel und sichere wichtige Dateien.",
+    "space": "Lösch nicht mehr benötigte Dateien und leere den Papierkorb.",
+    "memory": "Der Arbeitsspeicher wurde knapp. Hilft ein Neustart nicht, schick den Fehlerbericht.",
+}
+
+
+def _error_state() -> list[dict]:
+    rows = []
+    for unit, label in (("nginx", "Verschlüsselter Zugang (nginx)"), ("smbd", "Netzlaufwerk"), ("pinas-rescue", "Notfallhelfer")):
+        info = service_info(unit)
+        rows.append({"label": label, "color": info["color"], "text": info["state"]})
+    power = throttled()
+    if power:
+        rows.insert(0, {"label": "Stromversorgung und Temperatur", "text": "in Ordnung" if power == "OK" else power,
+                        "color": "ok" if power == "OK" else "bad"})
+    return rows
+
+
+@bp.get("/dashboard/fehler")
+@admin_required
+def errors_page():
+    rows = [{**e, "hint": _ERROR_HINTS.get(e.get("kind"), "")} for e in crashlog.read()]
+    return render_template("errors.html", rows=rows, state=_error_state())
+
+
+@bp.get("/dashboard/fehler/bericht")
+@admin_required
+def errors_report():
+    name = "pinas-fehlerbericht-" + datetime.now().strftime("%Y-%m-%d-%H%M") + ".txt"
+    return Response(crashlog.report(), mimetype="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+
+
+@bp.post("/dashboard/fehler/test")
+@admin_required
+def errors_test():
+    """Zeigt auf dem echten Pi, ohne Anmeldung am Gerät, dass das Aufschreiben funktioniert."""
+    raise RuntimeError("Testfehler: vom Administrator ausgelöst, alles in Ordnung")
+
+
+@bp.post("/dashboard/fehler/leeren")
+@admin_required
+def errors_clear():
+    crashlog.clear()
+    try:
+        helper().crash_report_clear()
+    except HelperError:
+        pass
+    flash("Fehlerprotokoll geleert.", "ok")
+    return redirect(url_for("dashboard.errors_page"))
+
+
 @bp.get("/dashboard")
 @login_required
 def index():
@@ -587,6 +656,7 @@ def index():
     return render_template("dashboard.html", s=stats(), devices=devices, services=services,
                            data_alias=data_alias, layout=layout(), power=power_state(), options=opts,
                            event_rows=event_rows,
+                           errors=crashlog.summary() if g.user["is_admin"] else None,
                            timer=powertimer.view(current_app.config) if g.user["is_admin"] else None)
 
 

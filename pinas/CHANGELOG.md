@@ -2,6 +2,15 @@
 
 Neueste Version oben. Das Update-Center zeigt die Abschnitte an, die neuer sind als die installierte Version.
 
+## 1.3.0
+- Neues Fehlerprotokoll im Dashboard (nur für Administratoren): PiNAS schreibt Abstürze und Fehler auf und erstellt daraus einen Fehlerbericht zum Herunterladen, ohne Passwörter, Datei- und Benutzernamen
+- Fällt die Weboberfläche aus, erscheint eine Notfallseite statt „502 Bad Gateway“. Dort lassen sich mit dem Administrator-Passwort der Bericht herunterladen, PiNAS neu starten und die vorherige Version wiederherstellen
+- Das Systemprotokoll bleibt jetzt über Neustarts erhalten (höchstens 64 MB)
+- „Nach Updates suchen“ findet neue Versionen jetzt direkt auf GitHub und zeigt die Neuigkeiten an. Installiert wird weiterhin erst, wenn du es bestätigst
+- Die Suche meldet verständlich, wenn PiNAS schon aktuell oder GitHub nicht erreichbar ist
+- Update-Center: Die Seite bleibt während der Installation nicht mehr stehen, wenn die neue Version eine neue Anmeldung verlangt, und zeigt einen Hinweis, wenn PiNAS kurz nicht erreichbar ist
+- Datum und Uhrzeit des PiNAS stehen jetzt in der Kopfzeile jeder Seite (auf dem Handy nur die Uhrzeit)
+
 ## 1.2.8
 - Dateien: Ganze Ordner lassen sich jetzt als ZIP herunterladen – per Knopf oder Rechtsklick, mit Fortschrittsfenster und „Abbrechen“. Solange das läuft, sind Abmelden und Herunterfahren gesperrt wie bei jeder Übertragung
 - Dateien: Ordner sind deutlicher markiert: Ein Pfeil hinter dem Namen zeigt, dass es hineingeht, und in den Symbolansichten trifft ein Klick nicht mehr aus Versehen „Umbenennen“ oder „Löschen“

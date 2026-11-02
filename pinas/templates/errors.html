@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Fehlerprotokoll{% endblock %}
+{% block hero %}
+<section class="hero"><div class="inner">
+  <h1>Fehler-<b>Protokoll</b></h1>
+  <p>Was bei PiNAS nicht geklappt hat. Der Fehlerbericht enthält alles, was zum Beheben nötig ist.</p>
+</div></section>
+{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='errors.css') }}">
+<p><a href="{{ url_for('dashboard.index') }}">← Zurück zum Dashboard</a></p>
+
+<div class="card">
+  <h2>Fehlerbericht</h2>
+  <p>Lade den Bericht herunter und zieh die Datei in den Chat mit Claude. Daraus lässt sich der Fehler lesen und ein
+    Update bauen, das ihn behebt. Claude kann nicht selbst auf deinen PiNAS schauen.</p>
+  <p class="err-actions">
+    <a class="btn-sm primary" href="{{ url_for('dashboard.errors_report') }}" download>Fehlerbericht herunterladen</a>
+  </p>
+  <details class="err-inside">
+    <summary>Was steht im Bericht?</summary>
+    <p><b>Enthalten:</b> PiNAS-Version, Pi-Modell, Zustand der Dienste, Stromversorgung und Temperatur, Speicherplatz,
+      die Fehler auf dieser Seite und Auszüge aus den Systemprotokollen, auch vom Start davor.</p>
+    <p><b>Entfernt:</b> Passwörter und Passwort-Hashes, Schlüssel, Sitzungsdaten, Datei- und Ordnernamen von der Festplatte,
+      Benutzernamen (werden zu benutzer1, benutzer2 …) und IP-Adressen im Heimnetz.</p>
+    <p>Die Datei ist reiner Text. Du kannst sie vor dem Weitergeben selbst durchlesen.</p>
+  </details>
+</div>
+
+<div class="card">
+  <h2>Zustand jetzt</h2>
+  <table class="list compact err-state">
+    {% for row in state %}
+    <tr><td><span class="dot {{ row.color }}"></span>{{ row.label }}</td><td>{{ row.text }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h2>Aufgeschriebene Fehler</h2>
+  {% if not rows %}
+  <p class="muted">Bisher wurde kein Fehler aufgeschrieben.</p>
+  {% endif %}
+  {% for e in rows %}
+  <details class="err-entry">
+    <summary>
+      <span class="dot {{ 'bad' if e.level == 'error' else 'warn' }}"></span>
+      <span class="err-title">{{ e.title }}</span>
+      <span class="err-meta">{{ e.time }}{% if e.repeats %} · davor {{ e.repeats }}× wiederholt{% endif %}</span>
+    </summary>
+    {% if e.hint %}<p class="err-hint">{{ e.hint }}</p>{% endif %}
+    {% if e.text %}<p class="err-text">{{ e.text }}</p>{% endif %}
+    <p class="muted err-meta">Nummer {{ e.id }} · Version {{ e.version }}
+      {%- if e.context.seite %} · Seite {{ e.context.seite }}{% endif %}
+      {%- if e.context.benutzer %} · Benutzer {{ e.context.benutzer }}{% endif %}</p>
+    {% if e.trace %}<pre class="err-trace">{{ e.trace }}</pre>{% endif %}
+  </details>
+  {% endfor %}
+</div>
+
+<p class="muted err-note">Das Protokoll ist immer eingeschaltet und auf etwa 1 MB begrenzt, ältere Einträge fallen automatisch weg.
+  Derselbe Fehler wird höchstens einmal pro Stunde geschrieben. Antwortet die Weboberfläche gar nicht mehr, erscheint statt
+  ihr eine Notfallseite, auf der du den Bericht mit deinem Administrator-Passwort herunterladen kannst.</p>
+
+<div class="err-actions">
+  <form method="post" action="{{ url_for('dashboard.errors_test') }}" class="inline" data-confirm="PiNAS löst einen harmlosen Fehler aus, damit du sehen kannst, ob das Aufschreiben funktioniert. Du siehst dabei kurz die Fehlerseite." data-confirm-title="Testfehler auslösen?" data-confirm-ok="Auslösen">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn-sm">Testfehler auslösen</button>
+  </form>
+  <form method="post" action="{{ url_for('dashboard.errors_clear') }}" class="inline" data-confirm="Alle aufgeschriebenen Fehler werden gelöscht. Das lässt sich nicht rückgängig machen." data-confirm-title="Protokoll leeren?" data-confirm-ok="Leeren" data-confirm-danger>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn-sm">Protokoll leeren</button>
+  </form>
+</div>
+{% endblock %}
