@@ -60,7 +60,8 @@
       if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;  // z. B. Strg+Klick: neuer Tab
       e.preventDefault();
       const item = dl.closest(".fv-item");
-      transfer.download({ href: dl.href, name: item.dataset.name, dest: place(), size: +item.dataset.size });
+      const isDir = item.dataset.dir === "1";
+      transfer.download({ href: dl.href, name: item.dataset.name, dest: place(), size: isDir ? 0 : +item.dataset.size, isDir });
       return;
     }
     const btn = e.target.closest("[data-rename], [data-delete]");
