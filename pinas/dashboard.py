@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
-from . import events
+from . import events, transfers
 from .auth import admin_required, helper, login_required
 from .db import get_db
 from .helper import HelperError
@@ -386,6 +386,8 @@ POWER_ACTIONS = {
     "festplatte-an": ("disk-on", "Festplatte ist wieder eingeschaltet."),
     "abbrechen": ("cancel", "Geplantes Herunterfahren abgebrochen."),
 }
+# Nicht, solange jemand über die Weboberfläche Dateien hoch- oder herunterlädt
+_NEEDS_IDLE = {"shutdown", "reboot", "safe-shutdown", "disk-off"}
 
 
 @bp.post("/system/<action>")
@@ -394,9 +396,13 @@ def power(action):
     if action not in POWER_ACTIONS:
         return redirect(url_for("dashboard.index"))
     cmd, message = POWER_ACTIONS[action]
+    running = transfers.busy() if cmd in _NEEDS_IDLE else []
     try:
-        helper().power(cmd)
-        flash(message, "ok")
+        if running:
+            flash(transfers.describe(running), "error")
+        else:
+            helper().power(cmd)
+            flash(message, "ok")
     except HelperError as exc:
         flash(str(exc), "error")
     # Zurück auf die Seite, von der aus geklickt wurde (die Knöpfe stehen in der Kopfzeile jeder Seite)

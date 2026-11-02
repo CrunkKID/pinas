@@ -12,7 +12,7 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
-from . import users
+from . import transfers, users
 from .auth import admin_required, helper
 from .db import get_db
 from .helper import HelperError
@@ -209,7 +209,10 @@ def factory_reset():
     f = request.form
     wipe = f.get("wipe") == "1"
     word = "alles löschen" if wipe else "zurücksetzen"
-    if not users.verify(get_db(), g.user["username"], f.get("password", "")):
+    running = transfers.busy()
+    if running:
+        flash(transfers.describe(running), "error")
+    elif not users.verify(get_db(), g.user["username"], f.get("password", "")):
         flash("Das Passwort ist falsch – PiNAS wurde nicht zurückgesetzt.", "error")
     elif f.get("confirm", "").strip().lower() != word:
         flash(f"Zum Bestätigen bitte genau „{word}“ eintippen.", "error")
@@ -228,6 +231,11 @@ def factory_reset():
 def action(action):
     names = {"installieren": "apply", "zurueck": "rollback", "verwerfen": "discard"}
     if action not in names:
+        return redirect(url_for("updates.index"))
+    # Installieren und Zurückgehen starten PiNAS neu – das würde laufende Übertragungen abbrechen
+    running = transfers.busy() if action != "verwerfen" else []
+    if running:
+        flash(transfers.describe(running), "error")
         return redirect(url_for("updates.index"))
     try:
         helper().update(names[action])

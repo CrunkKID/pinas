@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}PiNAS{% endblock %} · PiNAS</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='transfer.css') }}">
   <!-- Als App installierbar (pwa.py) -->
   <link rel="manifest" href="{{ url_for('pwa.manifest') }}">
   <meta name="theme-color" content="#c51a4a">
@@ -38,7 +39,7 @@
         {% endif %}
         <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="link">Abmelden</button>
+          <button class="link" data-lock-logout>Abmelden</button>
         </form>
       </div>
     </div>
@@ -97,6 +98,7 @@
   <script>window.CSRF = "{{ csrf_token() }}";</script>
   <script src="{{ url_for('static', filename='confirm.js') }}"></script>
   <script src="{{ url_for('static', filename='countdown.js') }}"></script>
+  {% if user %}<script src="{{ url_for('static', filename='transfer.js') }}"></script>{% endif %}
   <script>
     // App-Funktion: geht nur über https mit vertrautem Zertifikat – sonst einfach weiter als Webseite
     if ("serviceWorker" in navigator && window.isSecureContext) {

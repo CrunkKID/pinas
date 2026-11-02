@@ -95,7 +95,7 @@
   <p class="muted upd-sha">Prüfsumme der Datei (SHA-256): <code>{{ staged.sha256 }}</code><br>
     Bei einer ZIP von GitHub steht dieselbe Zahl dort unter „Artifacts“ als „Digest“.</p>
   <div class="upd-row">
-    <form method="post" action="{{ url_for('updates.action', action='installieren') }}" class="inline"
+    <form method="post" action="{{ url_for('updates.action', action='installieren') }}" class="inline" data-lock-idle
           data-confirm="PiNAS wird auf Version {{ staged.version }} aktualisiert (ca. {{ ((staged.estimate or 120) / 60)|round(0, 'ceil')|int }} Min.) und startet danach automatisch neu. Weboberfläche und Netzlaufwerk sind dabei ein paar Minuten nicht erreichbar. Laufende Kopiervorgänge vorher beenden."
           data-confirm-title="Update installieren?" data-confirm-ok="Jetzt installieren">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -126,7 +126,7 @@
 <div class="card upd-row upd-rollback">
   <p class="muted">Läuft nach einem Update etwas nicht wie gewünscht? PiNAS kann die zuvor installierte
     {% if st.previous %}Version {{ st.previous }}{% else %}Version{% endif %} wiederherstellen. Deine Dateien bleiben unberührt.</p>
-  <form method="post" action="{{ url_for('updates.action', action='zurueck') }}" class="inline"
+  <form method="post" action="{{ url_for('updates.action', action='zurueck') }}" class="inline" data-lock-idle
         data-confirm="Die vorherige PiNAS-Version wird wiederhergestellt. Die Weboberfläche ist dabei ein paar Minuten nicht erreichbar."
         data-confirm-title="Vorherige Version wiederherstellen?" data-confirm-ok="Wiederherstellen">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -161,7 +161,8 @@
     <label><span>Zum Bestätigen „<b id="reset-word">zurücksetzen</b>“ eintippen</span>
       <input name="confirm" id="reset-confirm" autocomplete="off" autocapitalize="none" spellcheck="false" required></label>
   </div>
-  <div><button class="danger" id="reset-btn" disabled>Auf Werkseinstellungen zurücksetzen</button></div>
+  {# Das Skript unten schaltet den Knopf selbst um, deshalb sperrt transfer.js hier den Rahmen darum #}
+  <fieldset class="xfer-lockbox" data-lock-idle><button class="danger" id="reset-btn" disabled>Auf Werkseinstellungen zurücksetzen</button></fieldset>
 </form>
 
 <details class="card upd-help">

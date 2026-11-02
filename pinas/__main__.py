@@ -36,8 +36,12 @@ def main() -> None:
     except ImportError:
         app.run(host=host, port=port)
         return
-    # Große Uploads erlauben (Standard von waitress wäre 1 GB)
-    serve(app, host=host, port=port, threads=8, max_request_body_size=256 * 1024**3)
+    # Große Uploads erlauben (Standard von waitress wäre 1 GB). Teilstücke beim Hochladen (16 MB, siehe
+    # transfer.js) bleiben im Arbeitsspeicher, statt erst in eine Zwischendatei auf der Platte zu wandern.
+    # Beim Herunterladen höchstens 4 MB vorauspuffern, damit die Fortschrittsanzeige stimmt.
+    serve(app, host=host, port=port, threads=16, max_request_body_size=256 * 1024**3,
+          inbuf_overflow=32 * 1024**2, outbuf_overflow=8 * 1024**2, outbuf_high_watermark=4 * 1024**2,
+          recv_bytes=256 * 1024, send_bytes=270_000)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """Dateibrowser: Auflisten, Hoch-/Herunterladen, Ordner anlegen, Umbenennen, Löschen."""
 import os
 import shutil
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +10,7 @@ from types import SimpleNamespace
 from flask import (Blueprint, abort, current_app, flash, g, jsonify, make_response, redirect,
                    render_template, request, send_file, url_for)
 
-from . import events, private, quota
+from . import events, private, quota, transfers
 from .auth import login_required
 from .config import TRASH_NAME, storage
 
@@ -17,6 +18,8 @@ bp = Blueprint("files", __name__)
 
 ROOTS = {"privat": "Privat", "gemeinsam": "Gemeinsam"}
 _FORBIDDEN_CHARS = set('/\\\0')
+_DOWNLOAD_BLOCK = 256 * 1024
+_SYNC_EVERY = 64 * 1024 * 1024
 
 # Dateiart für Symbolfarbe, Vorschaubild und die Spalte „Typ“ (wie im Windows-Explorer)
 _KINDS = {
@@ -148,7 +151,10 @@ def browse(root, sub=""):
                 events.log("download", f"{ROOTS[root]}/{rel(base, target)}", events.size_of(target))
             elif request.headers.get("Sec-Fetch-Dest", "document") == "document":
                 events.log("open", f"{ROOTS[root]}/{rel(base, target)}", events.size_of(target))
-        return send_file(target, as_attachment=request.args.get("dl") == "1", conditional=True)
+        resp = send_file(target, as_attachment=request.args.get("dl") == "1", conditional=True)
+        if request.args.get("dl") == "1" and request.method == "GET" and resp.status_code == 200:
+            return _tracked_download(resp, target)
+        return resp
     if not target.is_dir():
         abort(404)
 
@@ -193,35 +199,162 @@ def browse(root, sub=""):
     return resp
 
 
+def _tracked_download(resp, path: Path):
+    """Liefert die Datei blockweise und zählt mit, wie weit sie ist (für das Übertragungsfenster)."""
+    entry = transfers.begin("download", path.name, path.stat().st_size, tid=request.args.get("t", ""))
+
+    def blocks():
+        with open(path, "rb") as f:
+            while not entry["cancel"] and (block := f.read(_DOWNLOAD_BLOCK)):
+                entry["done"] += len(block)
+                yield block
+
+    if hasattr(resp.response, "close"):
+        resp.response.close()  # die von send_file geöffnete Datei
+    resp.direct_passthrough = False
+    resp.response = blocks()
+    resp.call_on_close(lambda: transfers.end(entry, remember=True))
+    return resp
+
+
+@bp.get("/api/uebertragung")
+@login_required
+def transfer_busy():
+    # Sperrt in der Kopfzeile Abmelden und Herunterfahren, solange etwas übertragen wird
+    running, own = transfers.busy(), transfers.mine()
+    return jsonify(busy=bool(running), mine=bool(own), text=transfers.describe(own or running))
+
+
+@bp.get("/api/uebertragung/<tid>")
+@login_required
+def transfer_status(tid):
+    return jsonify(transfers.status(tid))
+
+
+@bp.post("/api/uebertragung/<tid>/abbrechen")
+@login_required
+def transfer_cancel(tid):
+    entry = transfers.get(tid)
+    if entry:
+        entry["cancel"] = True
+    return jsonify(ok=bool(entry))
+
+
+def _remove_old_uploads(folder: Path) -> None:
+    """Reste abgebrochener Uploads (z. B. nach einem Stromausfall) aufräumen."""
+    limit = time.time() - 3600
+    for leftover in folder.glob(".pinas-upload-*"):
+        try:
+            if leftover.stat().st_mtime < limit:
+                leftover.unlink()
+        except OSError:
+            pass
+
+
+# Hochladen in Teilstücken: Jedes Stück landet sofort in der Zieldatei, statt dass der Server die fertig
+# empfangene Datei am Ende noch einmal auspacken und umkopieren muss. So ist das Fenster bei 100 %
+# wirklich fertig. Ablauf: upload (anmelden) → upload_part (je Stück) → upload_done bzw. upload_cancel.
 @bp.post("/dateien/<root>/upload")
 @login_required
 def upload(root):
     base, target = resolve(root, request.form.get("dir", ""))
     if not target.is_dir():
         return jsonify(error="Zielordner existiert nicht."), 400
+    try:
+        size = int(request.form.get("size", ""))
+        name = new_name(root, base, target, os.path.basename(request.form.get("name", "").replace("\\", "/")))
+        if size < 0:
+            raise ValueError("Ungültige Dateigröße.")
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    filesize = current_app.jinja_env.filters["filesize"]
     if root == "privat":
         space = quota.info(g.user["username"])
-        if space["limit"] and quota.used(g.user["username"], fresh=True) + (request.content_length or 0) > space["limit"]:
-            free = current_app.jinja_env.filters["filesize"](space["free"])
-            return jsonify(errors=[f"Dein Speicherplatz reicht dafür nicht – frei sind noch {free}. "
-                                   "Lösche Dateien (auch im Papierkorb) oder bitte den Administrator um mehr Platz."]), 413
+        if space["limit"] and quota.used(g.user["username"], fresh=True) + size > space["limit"]:
+            return jsonify(error=f"Dein Speicherplatz reicht dafür nicht – frei sind noch {filesize(space['free'])}. "
+                                 "Lösche Dateien (auch im Papierkorb) oder bitte den Administrator um mehr Platz."), 413
         quota.forget(g.user["username"])
-    saved, errors = [], []
-    for f in request.files.getlist("files"):
+    free = shutil.disk_usage(target).free
+    if size > free:
+        return jsonify(error=f"Auf der Festplatte ist nicht genug Platz – frei sind noch {filesize(free)}."), 507
+    _remove_old_uploads(target)
+    tmp = target / f".pinas-upload-{uuid.uuid4().hex}"
+    try:
+        tmp.touch()
+    except OSError as exc:
+        return jsonify(error=str(exc)), 500
+    entry = transfers.begin("upload", name, size, path=tmp, root=root, base=base, unsynced=0)
+    return jsonify(id=entry["id"])
+
+
+def _own_upload(root: str, tid: str) -> dict:
+    root_dir(root)  # Festplatte ausgeschaltet: hier abbrechen
+    entry = transfers.get(tid)
+    if not entry or entry["kind"] != "upload" or entry["root"] != root:
+        abort(make_response(jsonify(error="Das Hochladen ist abgelaufen – bitte erneut versuchen."), 404))
+    return entry
+
+
+@bp.post("/dateien/<root>/upload/<tid>")
+@login_required
+def upload_part(root, tid):
+    entry = _own_upload(root, tid)
+    offset = request.headers.get("X-Offset", type=int)
+    with entry["lock"]:
+        # Kleiner als bisher empfangen: Der Browser wiederholt ein Stück nach einem Verbindungsfehler
+        if offset is None or not 0 <= offset <= entry["done"]:
+            return jsonify(error="Teilstück passt nicht.", received=entry["done"]), 409
         try:
-            name = new_name(root, base, target, os.path.basename((f.filename or "").replace("\\", "/")))
-            dest = unique_path(target / name)
-            tmp = target / f".pinas-upload-{uuid.uuid4().hex}"
-            try:
-                f.save(tmp)
-                os.replace(tmp, dest)
-            finally:
-                tmp.unlink(missing_ok=True)
-            saved.append(dest.name)
-            events.log("upload", f"{ROOTS[root]}/{rel(base, dest)}", events.size_of(dest))
+            with open(entry["path"], "r+b") as f:
+                f.seek(offset)
+                f.truncate()
+                written = 0
+                while block := request.stream.read(1024 * 1024):
+                    f.write(block)
+                    written += len(block)
+                    transfers.touch(entry)  # langsames Netz: Das Stück läuft noch, also nicht als abgebrochen werten
+                entry["done"] = offset + written
+                entry["unsynced"] += written
+                # Regelmäßig wirklich auf die Platte schreiben, sonst staut es sich und dauert am Ende
+                if entry["unsynced"] >= _SYNC_EVERY:
+                    f.flush()
+                    os.fsync(f.fileno())
+                    entry["unsynced"] = 0
+        except OSError as exc:
+            return jsonify(error=str(exc)), 500
+        transfers.touch(entry)
+    return jsonify(received=entry["done"])
+
+
+@bp.post("/dateien/<root>/upload/<tid>/fertig")
+@login_required
+def upload_done(root, tid):
+    entry = _own_upload(root, tid)
+    with entry["lock"]:
+        if entry["done"] != entry["size"]:
+            return jsonify(error="Die Datei ist nicht vollständig angekommen."), 409
+        try:
+            with open(entry["path"], "rb") as f:
+                os.fsync(f.fileno())
+            dest = unique_path(entry["path"].with_name(entry["name"]))
+            os.replace(entry["path"], dest)
         except (ValueError, OSError) as exc:
-            errors.append(f"{f.filename}: {exc}")
-    return jsonify(saved=saved, errors=errors), (200 if not errors else 207)
+            return jsonify(error=str(exc)), 500
+        transfers.end(entry)
+    if root == "privat":
+        quota.forget(g.user["username"])
+    events.log("upload", f"{ROOTS[root]}/{rel(entry['base'], dest)}", events.size_of(dest))
+    return jsonify(saved=dest.name)
+
+
+@bp.post("/dateien/<root>/upload/<tid>/abbrechen")
+@login_required
+def upload_cancel(root, tid):
+    entry = _own_upload(root, tid)
+    with entry["lock"]:
+        transfers.end(entry)
+        entry["path"].unlink(missing_ok=True)
+    return jsonify(ok=True)
 
 
 @bp.post("/dateien/<root>/ordner")

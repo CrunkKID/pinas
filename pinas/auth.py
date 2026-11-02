@@ -7,7 +7,7 @@ import time
 from flask import (Blueprint, abort, current_app, flash, g, redirect, render_template,
                    request, session, url_for)
 
-from . import events, users
+from . import events, transfers, users
 from .config import storage
 from .db import get_db
 from .helper import HelperError
@@ -150,6 +150,11 @@ def setup():
 
 @bp.post("/logout")
 def logout():
+    # Ohne Anmeldung würden laufende Übertragungen dieses Browsers abbrechen
+    running = transfers.mine() if g.user else []
+    if running:
+        flash(transfers.describe(running), "error")
+        return redirect(url_for("index"))
     events.log("logout")
     session.clear()
     return redirect(url_for("auth.login"))

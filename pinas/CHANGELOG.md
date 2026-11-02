@@ -2,6 +2,12 @@
 
 Neueste Version oben. Das Update-Center zeigt die Abschnitte an, die neuer sind als die installierte Version.
 
+## 1.2.6
+- Das Übertragungsfenster bleibt beim Wechsel auf einen anderen Reiter sichtbar – Hoch- und Herunterladen laufen dabei weiter
+- Hochladen: Dateien werden in Teilstücken übertragen, das lange Warten am Ende fällt weg. Kurze Netzwerk-Aussetzer werden automatisch überbrückt
+- Herunterladen: Auch sehr große Dateien zeigen jetzt Fortschritt und Restzeit und lassen sich abbrechen
+- Während einer Übertragung sind Abmelden, Herunterfahren, Neustart, Sicheres Herunterfahren, Festplatte ausschalten, Update installieren und Werkseinstellungen gesperrt – auch von anderen Geräten aus (Abmelden nur im Browser, der gerade überträgt)
+
 ## 1.2.5
 - Die Reiter stehen jetzt als Seitenleiste links untereinander – auf dem Handy bleiben sie eine Leiste oben zum Wischen
 - Dateien: Beim Hoch- und Herunterladen erscheint ein Fortschrittsfenster wie bei Windows – mit Geschwindigkeit in Mbit/s, Restzeit, Verlaufskurve und „Abbrechen“
