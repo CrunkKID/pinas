@@ -2,6 +2,13 @@
 
 Neueste Version oben. Das Update-Center zeigt die Abschnitte an, die neuer sind als die installierte Version.
 
+## 1.2.8
+- Dateien: Ganze Ordner lassen sich jetzt als ZIP herunterladen – per Knopf oder Rechtsklick, mit Fortschrittsfenster und „Abbrechen“. Solange das läuft, sind Abmelden und Herunterfahren gesperrt wie bei jeder Übertragung
+- Dateien: Ordner sind deutlicher markiert: Ein Pfeil hinter dem Namen zeigt, dass es hineingeht, und in den Symbolansichten trifft ein Klick nicht mehr aus Versehen „Umbenennen“ oder „Löschen“
+- Passwort ändern: Deine anderen Geräte werden dabei abgemeldet, der aktuelle Browser bleibt angemeldet – auch wenn ein Administrator sein eigenes Passwort unter „Benutzer“ ändert
+- Wichtig: Nach diesem Update müssen sich alle Benutzer auf ihren Geräten einmal neu anmelden
+- Konto: Texte verständlicher formuliert, auch die Anleitungen fürs Netzlaufwerk und für die App
+
 ## 1.2.7
 - Neuer Abschalt-Timer im Dashboard (nur für Administratoren): PiNAS schaltet sich zu festen Zeiten ab und per eingebauter Uhr des Raspberry Pi 5 wieder ein – wählbar nach Wochentagen
 - Abschalt-Timer: 5 Minuten vorher erscheint auf jeder Seite ein Hinweis mit „Abbrechen“. Laufende Übertragungen, Updates und geöffnete Dateien am Netzlaufwerk verschieben die Abschaltung
