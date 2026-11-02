@@ -3,9 +3,11 @@ import os
 import shutil
 import time
 import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import quote
 
 from flask import (Blueprint, abort, current_app, flash, g, jsonify, make_response, redirect,
                    render_template, request, send_file, url_for)
@@ -157,6 +159,8 @@ def browse(root, sub=""):
         return resp
     if not target.is_dir():
         abort(404)
+    if request.args.get("dl") == "1" and request.method == "GET":
+        return _zip_download(root, base, target)
 
     entries = []
     hidden = hidden_names(root) if target == base else frozenset()
@@ -213,6 +217,103 @@ def _tracked_download(resp, path: Path):
         resp.response.close()  # die von send_file geöffnete Datei
     resp.direct_passthrough = False
     resp.response = blocks()
+    resp.call_on_close(lambda: transfers.end(entry, remember=True))
+    return resp
+
+
+class _ZipOut:
+    """Sammelt, was zipfile schreibt, bis der Generator es weiterreicht (nur ein paar hundert KB)."""
+
+    def __init__(self):
+        self.data = bytearray()
+
+    def write(self, chunk) -> int:
+        self.data += chunk
+        return len(chunk)
+
+    def flush(self) -> None:
+        pass
+
+    def take(self) -> bytes:
+        chunk = bytes(self.data)
+        self.data.clear()
+        return chunk
+
+
+class _ZipCancelled(Exception):
+    """Bricht die Antwort hart ab. Würde sie normal enden, hielte der Browser das halbe ZIP für fertig."""
+
+
+def _zip_contents(folder: Path, arc_root: str, hidden: frozenset, entry: dict) -> tuple[list, list]:
+    """Sucht alles für das ZIP zusammen und zählt die Größe mit. Symlinks bleiben draußen,
+    damit nichts von außerhalb des eigenen Bereichs ins ZIP gelangt."""
+    items, skipped = [(folder, arc_root, True)], []
+    pending = [(folder, arc_root, hidden)]
+    while pending:
+        current, arc, hide = pending.pop()
+        try:
+            with os.scandir(current) as it:
+                found = sorted(it, key=lambda e: e.name)
+        except OSError:
+            skipped.append(arc)
+            continue
+        for e in found:
+            if e.name in hide or e.name.startswith(".pinas-upload-") or e.is_symlink():
+                continue
+            name = f"{arc}/{e.name}"
+            try:
+                if e.is_dir(follow_symlinks=False):
+                    items.append((Path(e.path), name, True))
+                    pending.append((Path(e.path), name, frozenset()))
+                elif e.is_file(follow_symlinks=False):
+                    entry["size"] += e.stat(follow_symlinks=False).st_size
+                    items.append((Path(e.path), name, False))
+            except OSError:
+                skipped.append(name)
+    return items, skipped
+
+
+def _zip_stream(items: list, skipped: list, entry: dict):
+    """Erzeugt das ZIP beim Senden. Ohne Komprimieren: Fotos und Filme werden davon kaum kleiner,
+    und der Pi schafft so die volle Geschwindigkeit. entry zählt die Dateiinhalte."""
+    out = _ZipOut()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED, allowZip64=True) as archive:
+        for path, arc, is_dir in items:
+            try:
+                info = zipfile.ZipInfo.from_file(path, arc, strict_timestamps=False)
+                if is_dir:
+                    archive.writestr(info, b"")
+                    yield out.take()
+                    continue
+                with open(path, "rb") as source, archive.open(info, "w") as dest:
+                    while block := source.read(_DOWNLOAD_BLOCK):
+                        if entry["cancel"]:
+                            raise _ZipCancelled
+                        dest.write(block)
+                        entry["done"] += len(block)
+                        yield out.take()
+            except OSError:
+                skipped.append(arc)
+        if skipped:
+            archive.writestr("Nicht enthalten.txt", "Diese Einträge konnten nicht gelesen werden:\n" + "\n".join(skipped) + "\n")
+    # Fertig. Die Größe war nur die Summe beim Zusammensuchen, Dateien können sich seither geändert haben.
+    entry["size"] = entry["done"]
+    yield out.take()
+
+
+def _zip_download(root: str, base: Path, target: Path):
+    name = target.name if target != base else ROOTS[root]
+    entry = transfers.begin("download", name, 0, tid=request.args.get("t", ""))
+    try:
+        hidden = hidden_names(root) if target == base else frozenset()
+        items, skipped = _zip_contents(target, name, hidden, entry)
+    except Exception:
+        transfers.end(entry, remember=True)
+        raise
+    events.log("download", f"{ROOTS[root]}/{rel(base, target)} (Ordner als ZIP)".replace("/ (", " ("), entry["size"])
+    resp = current_app.response_class(_zip_stream(items, skipped, entry), mimetype="application/zip")
+    resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name + '.zip')}"
+    resp.headers["Cache-Control"] = "no-store"
     resp.call_on_close(lambda: transfers.end(entry, remember=True))
     return resp
 
