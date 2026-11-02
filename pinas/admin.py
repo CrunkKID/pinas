@@ -1,7 +1,7 @@
 from flask import Blueprint, current_app, flash, g, redirect, render_template, request, url_for
 
 from . import private, quota, users
-from .auth import admin_required, helper
+from .auth import admin_required, helper, keep_login
 from .config import storage
 from .db import get_db
 
@@ -60,7 +60,11 @@ def create():
 def password(username):
     try:
         users.set_password(get_db(), helper(), username, request.form.get("password", ""))
-        flash(f"Passwort für „{username}“ geändert.", "ok")
+        if username == g.user["username"]:
+            keep_login()
+            flash("Dein Passwort wurde geändert. Deine anderen Geräte wurden abgemeldet.", "ok")
+        else:
+            flash(f"Passwort für „{username}“ geändert.", "ok")
     except users.UserError as exc:
         flash(str(exc), "error")
     return redirect(url_for("admin.index"))
