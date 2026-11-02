@@ -93,7 +93,7 @@
     {% for e in entries %}
       <div class="fv-item" data-name="{{ e.name }}" data-kind="{{ e.kind }}" data-type="{{ e.type }}"
            data-size="{{ e.size if e.size is not none else -1 }}" data-ts="{{ e.ts }}" data-dir="{{ 1 if e.is_dir else 0 }}">
-        <a class="fv-main" href="{{ url_for('files.browse', root=root, sub=e.path) }}" title="{{ e.name }}"{% if not e.is_dir %} target="_blank"{% endif %}>
+        <a class="fv-main" href="{{ url_for('files.browse', root=root, sub=e.path) }}" title="{{ 'Ordner „' ~ e.name ~ '“ öffnen' if e.is_dir else e.name }}"{% if not e.is_dir %} target="_blank"{% endif %}>
           <span class="fv-icon">
             <svg><use href="#ic-{{ 'dir' if e.is_dir else 'file' }}"/></svg>
             {% if e.ext %}<span class="fv-badge">{{ e.ext[:4]|upper }}</span>{% endif %}
@@ -108,7 +108,7 @@
         <span class="fv-size">{{ e.size|filesize if not e.is_dir else '' }}</span>
         <span class="fv-date">{{ e.mtime }}</span>
         <span class="fv-actions">
-          {% if not e.is_dir %}<a class="btn-sm" data-download href="{{ url_for('files.browse', root=root, sub=e.path, dl=1) }}" title="Herunterladen">⬇</a>{% endif %}
+          <a class="btn-sm" data-download href="{{ url_for('files.browse', root=root, sub=e.path, dl=1) }}" title="{{ 'Ordner als ZIP herunterladen' if e.is_dir else 'Herunterladen' }}">⬇</a>
           <button class="btn-sm" data-rename="{{ e.path }}" data-name="{{ e.name }}" title="Umbenennen">✎</button>
           <button class="btn-sm danger" data-delete="{{ e.path }}" data-name="{{ e.name }}" title="Löschen">🗑</button>
         </span>
