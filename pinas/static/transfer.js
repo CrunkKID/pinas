@@ -444,11 +444,11 @@
   // ---------- Herunterladen ----------
   // Der Browser lädt selbst (ohne Umweg über den Arbeitsspeicher, läuft auch bei Seitenwechseln weiter).
   // Wie weit er ist, meldet der Server: Er zählt mit, was er schon abgeschickt hat.
-  function download({ href, name, dest, size }) {
+  function download({ href, name, dest, size, isDir }) {
     const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
     const a = document.createElement("a");
     a.href = `${href}${href.includes("?") ? "&" : "?"}t=${id}`;
-    a.download = name;
+    a.download = isDir ? `${name}.zip` : name;
     a.hidden = true;
     document.body.append(a);
     a.click();
@@ -459,7 +459,7 @@
       cancelled = true;
       post(`/api/uebertragung/${id}/abbrechen`).catch(() => {});
     });
-    win.what(`„${name}“ aus ${dest}`);
+    win.what(isDir ? `Ordner „${name}“ als ZIP aus ${dest}` : `„${name}“ aus ${dest}`);
 
     (async () => {
       changeRunning(1, false);
@@ -480,7 +480,7 @@
             if (ok) {
               // Der letzte Rest ist noch unterwegs zum Browser (höchstens ein paar MB)
               win.saving();
-              await sleep(Math.min(3000, (8e6 / Math.max(win.speed, 1e5)) * 1000));
+              await sleep(Math.min(3000, (Math.min(8e6, st.size) / Math.max(win.speed, 2e6)) * 1000));
               text = `✓ Heruntergeladen (${formatSize(st.size)})`;
             } else {
               text = "Herunterladen abgebrochen – die Verbindung wurde getrennt.";
