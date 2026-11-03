@@ -2,7 +2,11 @@
 import os
 from pathlib import Path
 
+from . import crashlog
+
 SETTINGS_FILE = Path("/etc/default/pinas")
+DISK_OFF_FLAG = Path("/run/pinas/disk-off")  # gesetzt von pinas-helper
+FSTAB = Path("/etc/fstab")
 
 # Papierkorb-Ordner ganz oben in „Privat“ und „Gemeinsam“ (gleicher Name wie bei Samba "recycle")
 TRASH_NAME = ".papierkorb"
@@ -29,6 +33,25 @@ def load_config() -> dict:
         # Update-Center: Status des Installers
         "UPDATE_DIR": Path(os.environ.get("PINAS_UPDATE_DIR", "/var/lib/pinas-update")),
     }
+
+
+def disk_is_off(cfg) -> bool:
+    """Wurde die Festplatte per Knopf abgemeldet? Darf nie eine Ausnahme werfen, das fragt jede Seite."""
+    try:
+        DISK_OFF_FLAG.stat()
+        return True
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as exc:
+        crashlog.record("disk", "Der Zustand der Festplatte ließ sich nicht lesen", str(exc), level="warn", key="disk|flag")
+    # Merker nicht lesbar: Ist eine Platte eingetragen, aber nicht eingehängt, gilt sie als aus
+    data = str(cfg["DATA_DIR"])
+    try:
+        lines = FSTAB.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    listed = any(line.split()[1:2] == [data] for line in lines if not line.lstrip().startswith("#"))
+    return listed and not os.path.ismount(data)
 
 
 def shared_mode() -> str:

@@ -11,6 +11,7 @@
 #   pinas-helper samba-config               (Samba-Freigaben neu schreiben)
 #   pinas-helper samba-audit on|off         (Netzlaufwerk-Zugriffe ins Ereignis-Protokoll, Modul full_audit)
 #   pinas-helper disk-sleep                 (NAS-Platte sofort in den Ruhezustand)
+#   pinas-helper disk-check check|repair|cancel  (Festplatte prüfen im eigenen Dienst, siehe pinas-diskcheck)
 #   pinas-helper update-stage DATEI         (Update-Paket prüfen und bereitlegen, siehe pinas-update)
 #   pinas-helper update-apply|update-rollback|update-discard
 #   pinas-helper power shutdown|reboot|update-reboot|safe-shutdown|disk-off|disk-on|cancel
@@ -111,9 +112,76 @@ samba_config() {
   [[ -n "$vfs" ]] && vfsline="s/^@V@//;s/@VFS@/$vfs/"
   sed -e "s|@USERS_DIR@|$(users_dir "$PINAS_SHARED_MODE" "$DATA")|g" \
       -e "s|@SHARED_DIR@|$(shared_dir "$PINAS_SHARED_MODE" "$DATA")|g" \
-      -e "s|@VETO@|$veto|g" -e "$recycle" -e "$audit" -e "$vfsline" "$SAMBA_TEMPLATE" > /etc/samba/pinas.conf
-  testparm -s >/dev/null 2>&1 || die "Samba-Konfiguration fehlerhaft"
+      -e "s|@VETO@|$veto|g" -e "$recycle" -e "$audit" -e "$vfsline" "$SAMBA_TEMPLATE" > /etc/samba/pinas.conf.base
+  { cat /etc/samba/pinas.conf.base; share_sections "$vfs"; } > /etc/samba/pinas.conf
+  if ! testparm -s >/dev/null 2>&1; then
+    # Eine fehlerhafte Ordnerfreigabe darf nicht „Privat“ und „Gemeinsam“ mitreißen
+    cp /etc/samba/pinas.conf.base /etc/samba/pinas.conf
+    testparm -s >/dev/null 2>&1 || die "Samba-Konfiguration fehlerhaft"
+    systemctl try-reload-or-restart smbd 2>/dev/null || true
+    die "Die Ordnerfreigaben konnten nicht ins Netzlaufwerk übernommen werden"
+  fi
   systemctl try-reload-or-restart smbd 2>/dev/null || true
+}
+
+SHARES_FILE="/var/lib/pinas/samba-shares"  # von set-shares geschrieben, Aufbau siehe pinas/shares.py
+
+# Nur echte PiNAS-Benutzer; auch den Dateiinhalt prüfen, er stammt vom Dienstbenutzer
+share_user_ok() {
+  [[ "$1" =~ ^[a-z][a-z0-9_-]{1,31}$ && " $(id -nG "$1" 2>/dev/null) " == *" $GROUP "* ]]
+}
+
+share_users_ok() {
+  local list="$1" u
+  [[ -z "$list" ]] && return 0
+  local -a all
+  IFS=',' read -r -a all <<< "$list"
+  for u in "${all[@]}"; do share_user_ok "$u" || return 1; done
+}
+
+# Gibt die Samba-Abschnitte der Ordnerfreigaben aus. Ungültige Zeilen entfallen, sie brechen nichts.
+share_sections() {
+  local vfs="$1" users name owner rel readers writers home path low
+  local bad_name='[][\\/:|<>+=;,?*"%$`'"'"']'
+  [[ -r "$SHARES_FILE" ]] || return 0
+  users="$(users_dir "$PINAS_SHARED_MODE" "$DATA")"
+  while IFS=$'\t' read -r name owner rel readers writers; do
+    [[ -n "$name" && ${#name} -le 70 && ! "$name" =~ $bad_name ]] || continue
+    # „-“ steht für eine leere Liste (Tabulatoren würde read sonst zusammenfassen)
+    [[ "$readers" == "-" ]] && readers=""
+    [[ "$writers" == "-" ]] && writers=""
+    low="${name,,}"
+    case "$low" in privat|gemeinsam|global|homes|printers|print\$|ipc\$) continue ;; esac
+    [[ -n "$rel" && "$rel" != /* && "$rel" != */ && "$rel" != *" " && ! "$rel" =~ (^|/)\.\.?(/|$) ]] || continue
+    [[ ! "$rel" =~ [%\\] && ! "$rel" =~ [[:cntrl:]] ]] || continue
+    [[ "$rel" != ".papierkorb" && "$rel" != .papierkorb/* ]] || continue
+    share_user_ok "$owner" || continue
+    share_users_ok "$readers" && share_users_ok "$writers" || continue
+    home="$users/$owner"
+    path="$(realpath -m -- "$home/$rel")"
+    [[ "$path" == "$(realpath -m -- "$home")"/* ]] || continue
+    printf '\n[%s]\n' "$name"
+    printf '   comment = Freigabe von %s\n' "$owner"
+    printf '   path = %s\n' "$path"
+    printf '   valid users = %s %s %s\n' "$owner" "${readers//,/ }" "${writers//,/ }"
+    printf '   read only = yes\n'
+    printf '   write list = %s %s\n' "$owner" "${writers//,/ }"
+    printf '   access based share enum = yes\n   force user = pinas\n   force group = pinas\n'
+    printf '   browseable = yes\n   create mask = 0660\n   directory mask = 0770\n'
+    printf '   veto files = /.pinas-upload-*/\n   delete veto files = yes\n'
+    # Speicherlimit und Papierkorb gehören dem Besitzer: Gelöschtes kann er in seinem „Privat“ wiederherstellen
+    printf '   dfree command = /usr/local/sbin/pinas-dfree\n   dfree cache time = 60\n   smb encrypt = desired\n'
+    [[ -n "$vfs" ]] && printf '   vfs objects = %s\n' "$vfs"
+    if [[ "$vfs" == *full_audit* ]]; then
+      printf '   full_audit:prefix = %%u|%%I|%%m|%%S\n   full_audit:success = connect openat mkdirat renameat unlinkat\n'
+      printf '   full_audit:failure = none\n   full_audit:facility = LOCAL5\n   full_audit:priority = NOTICE\n'
+    fi
+    if [[ "$vfs" == *recycle* ]]; then
+      printf '   recycle:repository = %s/.papierkorb/%s\n' "$(realpath -m -- "$home")" "$rel"
+      printf '   recycle:keeptree = yes\n   recycle:versions = yes\n   recycle:touch = yes\n'
+      printf '   recycle:exclude = .pinas-upload-*\n   recycle:exclude_dir = .papierkorb,.tmp\n'
+    fi
+  done < "$SHARES_FILE"
 }
 
 # Ordner anlegen; Rechte nur auf ext4 setzen (NTFS/exFAT regeln das über die Mount-Optionen)
@@ -263,6 +331,13 @@ DISK_OFF_FLAG="$RUN_DIR/disk-off"
 POWER_STATE="$RUN_DIR/power.json"
 SAFE_DELAY=120   # Sekunden zwischen Festplatte aus und Herunterfahren
 
+# Immer lesbar für die Weboberfläche: Unter sudo gilt die strenge umask des Dienstes (0027), mit bloßem
+# mkdir bekäme der Ordner 0750 und jede Seite scheiterte an den Dateien darin. chmod repariert auch einen vorhandenen
+ensure_run_dir() {
+  mkdir -p "$RUN_DIR"
+  chmod 0755 "$RUN_DIR"
+}
+
 # Festplatte sauber abmelden: Netzlaufwerk stoppen, aushängen, Motor anhalten
 disk_off() {
   mountpoint -q "$DATA" || die "Es ist keine Festplatte eingehängt."
@@ -282,7 +357,7 @@ disk_off() {
   sync
   # Motor anhalten; USB-Gehäuse verstehen je nach Modell den ATA- oder den SCSI-Befehl
   hdparm -y "$disk" >/dev/null 2>&1 || sdparm --readonly --command=stop "$disk" >/dev/null 2>&1 || true
-  mkdir -p "$RUN_DIR"
+  ensure_run_dir
   date +%s > "$DISK_OFF_FLAG"
   chmod 0644 "$DISK_OFF_FLAG"
 }
@@ -299,7 +374,7 @@ schedule_power() {
   cancel_power
   systemd-run --quiet --unit=pinas-power --on-active="${delay}s" --timer-property=AccuracySec=1s \
     /bin/systemctl "$action" || die "Konnte $label nicht planen."
-  mkdir -p "$RUN_DIR"
+  ensure_run_dir
   printf '{"action": "%s", "at": %s}\n' "$label" "$(( $(date +%s) + delay ))" > "$POWER_STATE"
   chmod 0644 "$POWER_STATE"
 }
@@ -359,7 +434,7 @@ rtc_wake_setup() {
 }
 
 timer_notice() {
-  mkdir -p "$RUN_DIR"
+  ensure_run_dir
   printf '{"action": "timer-shutdown", "at": %s}\n' "$(( $(date +%s) + $1 ))" > "$POWER_STATE"
   chmod 0644 "$POWER_STATE"
 }
@@ -419,7 +494,7 @@ factory_reset() {
   [[ "$mode" == "keep" || "$mode" == "wipe" ]] || die "Unbekannter Modus: $mode"
   systemctl is-active --quiet pinas-reset && die "Das Zurücksetzen läuft bereits."
   systemctl reset-failed pinas-reset 2>/dev/null || true
-  mkdir -p "$RUN_DIR"
+  ensure_run_dir
   printf '{"state": "running", "mode": "%s"}\n' "$mode" > "$RESET_STATUS"
   chmod 0644 "$RESET_STATUS"
   systemd-run --quiet --unit=pinas-reset --collect --description="PiNAS auf Werkseinstellungen" \
@@ -481,6 +556,15 @@ factory_reset_run() {
 # ---------------------------------------------------------------- Befehle
 
 cmd="${1:-}"
+# Während der Festplatten-Prüfung ist die Platte ausgehängt: nichts, was sie oder den Pi betrifft.
+# Der Abschalt-Timer verschiebt sich dadurch von selbst; einen angekündigten Termin abbrechen geht weiter
+case "$cmd" in
+  use-disk|set-layout|disk-sleep|factory-reset|timer-run|update-apply|update-rollback|power)
+    if [[ -e /run/pinas-disk-check && ! ( "$cmd" == "power" && "${2:-}" == "cancel" ) ]]; then
+      die "Gerade wird die Festplatte geprüft. Das geht erst, wenn die Prüfung fertig ist."
+    fi
+    ;;
+esac
 case "$cmd" in
   add-user|set-password|delete-user)
     [[ $# -eq 2 ]] || die "Aufruf: pinas-helper $cmd NAME"
@@ -544,6 +628,15 @@ case "$cmd" in
     samba_config
     exit 0
     ;;
+  set-shares)
+    [[ $# -eq 1 ]] || die "Aufruf: pinas-helper set-shares < LISTE"
+    tmp="$(mktemp "$SHARES_FILE.XXXXXX")"
+    head -c 1048576 > "$tmp"
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$SHARES_FILE"
+    samba_config
+    exit 0
+    ;;
   samba-audit)
     [[ $# -eq 2 && ( "$2" == "on" || "$2" == "off" ) ]] || die "Aufruf: pinas-helper samba-audit on|off"
     if [[ "$2" == "on" ]]; then
@@ -558,6 +651,14 @@ case "$cmd" in
   disk-sleep)
     [[ $# -eq 1 ]] || die "Aufruf: pinas-helper disk-sleep"
     exec /usr/local/sbin/pinas-diskpower --now
+    ;;
+  disk-check)
+    [[ $# -eq 2 ]] || die "Aufruf: pinas-helper disk-check check|repair|cancel"
+    case "$2" in
+      check|repair) exec /usr/local/sbin/pinas-diskcheck --start "$2" ;;
+      cancel) exec /usr/local/sbin/pinas-diskcheck --cancel ;;
+      *) die "Unbekannte Aktion: $2" ;;
+    esac
     ;;
   factory-reset|factory-reset-run)
     [[ $# -eq 2 ]] || die "Aufruf: pinas-helper $cmd keep|wipe"

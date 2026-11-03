@@ -212,23 +212,26 @@ def account():
                 return redirect(url_for("auth.account"))
             except users.UserError as exc:
                 flash(str(exc), "error")
-    from . import private
+    from . import private, shares
     from .quota import info
     return render_template("account.html", space=info(g.user["username"]),
-                           has_private=private.enabled(g.user["username"]))
+                           has_private=private.enabled(g.user["username"]),
+                           my_shares=shares.mine(g.user["username"]))
 
 
 @bp.post("/konto/privat")
 @login_required
 def private_drive():
     """Jeder Benutzer richtet sein privates Laufwerk selbst ein – oder schaltet es wieder aus."""
-    from . import private
+    from . import private, shares
     on = request.form.get("on") == "1"
     try:
         private.set_enabled(g.user["username"], on, helper())
     except HelperError as exc:
         flash(f"Das hat nicht geklappt: {exc}", "error")
         return redirect(url_for("auth.account"))
+    if shares.mine(g.user["username"]):
+        shares.sync()  # Freigaben ruhen, solange „Privat“ aus ist
     if on:
         flash("Dein privates Laufwerk „Privat“ ist eingerichtet – nur du siehst die Dateien darin.", "ok")
         return redirect(url_for("files.browse", root="privat"))

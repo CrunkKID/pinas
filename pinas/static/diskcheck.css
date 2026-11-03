@@ -1,0 +1,21 @@
+/* Reiter Laufwerk: Festplatte prüfen */
+.check-now { display: flex; align-items: center; gap: .6rem; margin-top: 0; }
+.check-spin { flex: none; width: 1rem; height: 1rem; border: 2px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: check-spin 1s linear infinite; }
+@keyframes check-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .check-spin { animation: none; } }
+
+.check-result { padding: .8rem 1rem; margin-bottom: 1rem; border-left: 4px solid var(--border); border-radius: var(--radius);
+  background: var(--band); overflow-wrap: anywhere; }
+.check-result.ok { border-color: var(--ok); }
+.check-result.warn { border-color: var(--accent); }
+.check-result.bad { border-color: var(--bad); }
+.check-result p { margin: .4rem 0; }
+.check-output { margin-top: .5rem; }
+.check-output summary { cursor: pointer; }
+.check-output pre { max-height: 16rem; overflow: auto; margin: .5rem 0 0; font-size: .8rem; white-space: pre-wrap; }
+
+.repair-form { display: flex; flex-direction: column; align-items: flex-start; gap: .5rem; margin-bottom: 1rem; }
+.repair-label { display: block; }
+.repair-label b { display: inline; }
+.repair-word { display: block; width: 100%; max-width: 20rem; margin-top: .4rem; }

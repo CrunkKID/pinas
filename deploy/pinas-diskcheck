@@ -1,0 +1,410 @@
+#!/usr/bin/python3 -I
+"""Festplatte prüfen und reparieren. Läuft als eigener Dienst (pinas-diskcheck.service), damit die Prüfung
+einen Seitenwechsel, das Schließen des Browsers und einen Neustart der Weboberfläche übersteht.
+
+  pinas-diskcheck --start check|repair   Bedingungen prüfen, Dienst starten (über pinas-helper disk-check)
+  pinas-diskcheck --cancel               Laufende reine Prüfung abbrechen; eine Reparatur läuft immer zu Ende
+  pinas-diskcheck --run                  Der Dienst selbst
+  pinas-diskcheck --finish               ExecStopPost: räumt auf, falls --run unerwartet gestorben ist
+
+/run/pinas-disk-check ist der Merker „Prüfung läuft“. Solange er da ist, sind Dateien in der Weboberfläche gesperrt
+und pinas-helper verweigert alles, was die Platte oder den Pi betrifft. Das Ergebnis steht in /var/lib/pinas/disk-check.json.
+
+exFAT: Der Kernel lässt eine beim Einhängen gefundene Dirty-Markierung bis zum nächsten fsck stehen, auch nach
+sauberem Aushängen (vol_flags_persistent in fs/exfat/super.c). Die Warnung beim Einhängen kommt deshalb bei jedem Start
+wieder, bis repariert wurde. fsck.exfat -n sieht die Markierung nicht, also wird sie hier direkt im Bootsektor gelesen.
+"""
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import threading
+import time
+from collections import deque
+
+STATE_DIR = "/var/lib/pinas"
+STATUS = os.path.join(STATE_DIR, "disk-check.json")
+FLAG = "/run/pinas-disk-check"
+RUN_DIR = "/run/pinas"
+POWER_STATE = os.path.join(RUN_DIR, "power.json")
+DISK_OFF = os.path.join(RUN_DIR, "disk-off")
+UPDATE_STATUS = "/var/lib/pinas-update/status.json"
+UNIT = "pinas-diskcheck.service"
+BOOT_ID = "/proc/sys/kernel/random/boot_id"
+CHECK_LIMIT = 12 * 3600  # Länger darf eine reine Prüfung das NAS nicht blockieren. Eine Reparatur wird nie abgewürgt
+DEV_RE = re.compile(r"^/dev/(sd[a-z]+[0-9]*|nvme[0-9]+n[0-9]+(p[0-9]+)?)$")
+REPAIRABLE = ("dirty", "errors")
+VOL_FLAGS_OFFSET = 106  # VolumeFlags im exFAT-Bootsektor; Bit 1: nicht sauber getrennt, Bit 2: Medienfehler
+
+term = False  # SIGTERM: Das System fährt herunter
+cancel = False  # SIGUSR1: „Abbrechen“ in der Weboberfläche
+
+
+class CheckError(Exception):
+    pass
+
+
+def sh(*args, timeout=60):
+    try:
+        return subprocess.run(args, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout,
+                              env={**os.environ, "LC_ALL": "C"})
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def out(*args, timeout=60):
+    res = sh(*args, timeout=timeout)
+    return res.stdout.strip() if res and res.returncode == 0 else ""
+
+
+def load(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_status(st):
+    tmp = STATUS + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(st, f, ensure_ascii=False)
+    os.chmod(tmp, 0o644)  # Die Weboberfläche liest mit, sie läuft als Benutzer pinas
+    os.replace(tmp, STATUS)
+
+
+def boot_id():
+    try:
+        with open(BOOT_ID) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def data_dir():
+    data = "/srv/nas"
+    try:
+        with open("/etc/default/pinas") as f:
+            for line in f:
+                if line.startswith("PINAS_DATA="):
+                    data = line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return data
+
+
+def locate(data):
+    """Partition und Dateisystem der NAS-Platte. Auch für eine Platte, die sich gerade nicht einhängen lässt."""
+    if os.path.ismount(data):
+        source = out("findmnt", "-no", "SOURCE", data)
+    else:
+        source = out("findmnt", "--fstab", "-no", "SOURCE", data)
+        if source.startswith("UUID="):
+            source = out("blkid", "-U", source[5:])
+    if not source:
+        raise CheckError("Es ist keine Festplatte eingerichtet.")
+    if not DEV_RE.match(source):
+        raise CheckError("Geprüft werden können nur USB-Festplatten, die NAS-Daten liegen aber woanders.")
+    root_source = out("findmnt", "-no", "SOURCE", "/")
+    if root_source and out("lsblk", "-no", "PKNAME", source) == out("lsblk", "-no", "PKNAME", root_source):
+        raise CheckError("Das Systemlaufwerk lässt sich im laufenden Betrieb nicht prüfen.")
+    fstype = out("blkid", "-s", "TYPE", "-o", "value", source)
+    if fstype not in ("exfat", "ext4", "ntfs"):
+        raise CheckError(f"Das Dateisystem {fstype or 'der Platte'} kann PiNAS nicht prüfen.")
+    return source, fstype
+
+
+def busy_reason():
+    """Warum gerade nicht geprüft werden darf. Leer: Es spricht nichts dagegen."""
+    power = load(POWER_STATE)
+    if power and power.get("at", 0) > time.time() - 60:
+        return "Gerade ist ein Herunterfahren, ein Neustart oder der Abschalt-Timer angekündigt. Bitte danach prüfen oder das zuerst abbrechen."
+    if os.path.exists(DISK_OFF):
+        return "Die Festplatte ist ausgeschaltet. Bitte zuerst im Dashboard wieder einschalten."
+    if load(UPDATE_STATUS).get("state") == "running":
+        return "Gerade läuft ein Update."
+    res = sh("pgrep", "-f", "pinas-update|pinas-helper (use-disk|set-layout|factory-reset)")
+    if res and res.returncode == 0:
+        return "Gerade läuft ein Update oder die Festplatte wird eingerichtet."
+    res = sh("smbstatus", "-L")
+    if res and re.search(r"^[0-9]+\s", res.stdout, re.M):
+        return "Am Netzlaufwerk sind noch Dateien geöffnet. Bitte dort zuerst schließen."
+    return ""
+
+
+def start(mode):
+    if mode == "repair":
+        last = load(STATUS)
+        if last.get("mode") != "check" or last.get("outcome") not in REPAIRABLE:
+            raise CheckError("Bitte zuerst prüfen. Repariert wird nur, wenn die letzte Prüfung etwas gefunden hat.")
+    # Merker zuerst: Wer ab jetzt die Platte braucht, wird von pinas-helper abgewiesen
+    try:
+        fd = os.open(FLAG, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        raise CheckError("Die Prüfung läuft bereits.") from None
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump({"mode": mode, "at": time.time()}, f)
+        os.chmod(FLAG, 0o644)
+        reason = busy_reason()
+        if reason:
+            raise CheckError(reason)
+        locate(data_dir())
+        sh("systemctl", "reset-failed", UNIT)
+        res = sh("systemctl", "start", UNIT, timeout=30)
+        if not res or res.returncode != 0:
+            raise CheckError("Der Prüfdienst konnte nicht gestartet werden.")
+    except Exception:
+        remove_flag()
+        raise
+
+
+def remove_flag():
+    try:
+        os.unlink(FLAG)
+    except OSError:
+        pass
+
+
+def cancel_check():
+    req = load(FLAG)
+    if not req:
+        raise CheckError("Es läuft gerade keine Prüfung.")
+    if req.get("mode") != "check":
+        raise CheckError("Eine laufende Reparatur darf nicht abgebrochen werden, sonst kann die Platte beschädigt bleiben.")
+    res = sh("systemctl", "kill", "-s", "SIGUSR1", "--kill-who=main", UNIT)
+    if not res or res.returncode != 0:
+        raise CheckError("Die Prüfung ließ sich nicht abbrechen.")
+
+
+def unmount(data, source, fstype):
+    res = sh("systemctl", "stop", "smbd", timeout=120)
+    if not res or res.returncode != 0:
+        print("smbd ließ sich nicht sauber stoppen", file=sys.stderr)
+    sh("sync", timeout=600)
+    if os.path.ismount(data):
+        # Nie „umount -l“: Die Platte wäre dann noch in Benutzung, während sie geprüft wird
+        res = sh("umount", data, timeout=300)
+        if not res or res.returncode != 0:
+            raise CheckError("Die Festplatte wird gerade noch benutzt (z. B. ein Kopiervorgang). Es wurde nichts geprüft. "
+                             "Bitte kurz warten und erneut versuchen.")
+    if fstype == "ntfs":
+        # ntfs-3g läuft nach dem Aushängen noch kurz weiter und hält die Platte so lange fest
+        for _ in range(30):
+            res = sh("pgrep", "-f", f"ntfs-3g.*{source}")
+            if not res or res.returncode != 0:
+                break
+            time.sleep(1)
+    if out("findmnt", "-no", "TARGET", "--source", source):
+        raise CheckError("Die Festplatte ist noch woanders eingehängt. Es wurde nichts geprüft.")
+
+
+def read_flags(source):
+    """(nicht sauber getrennt, Medienfehler) aus dem exFAT-Bootsektor, None wenn nicht lesbar."""
+    try:
+        with open(source, "rb") as f:
+            boot = f.read(512)
+    except OSError:
+        return None
+    if len(boot) < 512 or boot[3:11] != b"EXFAT   ":
+        return None
+    flags = int.from_bytes(boot[VOL_FLAGS_OFFSET:VOL_FLAGS_OFFSET + 2], "little")
+    return bool(flags & 0x02), bool(flags & 0x04)
+
+
+def tool_command(fstype, mode, source):
+    if fstype == "exfat":
+        return ["fsck.exfat", "-n" if mode == "check" else "-y", source]
+    if fstype == "ext4":
+        return ["e2fsck", "-f", "-n" if mode == "check" else "-y", source]
+    # ntfsfix ist kein chkdsk. Das sagt auch die Weboberfläche. -d: danach nicht als „zu prüfen“ markieren
+    return ["ntfsfix", "-n", source] if mode == "check" else ["ntfsfix", "-d", source]
+
+
+def run_tool(cmd, mode):
+    """Rückgabe: (Exit-Code oder None wenn abgebrochen, letzte Zeilen der Ausgabe)."""
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", errors="replace",
+                                env={**os.environ, "LC_ALL": "C"})
+    except OSError as exc:
+        raise CheckError(f"Das Programm {cmd[0]} konnte nicht gestartet werden: {exc}") from exc
+    lines = deque(maxlen=80)
+    reader = threading.Thread(target=lambda: lines.extend(proc.stdout), daemon=True)
+    reader.start()
+    begun, stopped = time.time(), False
+    while proc.poll() is None:
+        too_long = time.time() - begun > CHECK_LIMIT
+        # Eine reine Prüfung ändert nichts und darf jederzeit enden. Eine Reparatur läuft immer zu Ende,
+        # auch beim Herunterfahren: systemd wartet darauf (TimeoutStopSec)
+        if mode == "check" and not stopped and (cancel or term or too_long):
+            proc.terminate()
+            stopped = True
+        time.sleep(1)
+    reader.join(5)
+    return (None if stopped else proc.returncode), "".join(lines)[-6000:]
+
+
+def classify(fstype, mode, rc, flags_after):
+    """Ergebnis aus Exit-Code und Bootsektor. Exit-Codes von fsck.exfat und e2fsck sind Bitwerte:
+    1 korrigiert, 2 Neustart nötig, 4 Fehler übrig, 8 und höher: Bedienungs- oder Programmfehler."""
+    if fstype == "ntfs":
+        if rc != 0:
+            return "errors" if mode == "check" else "failed"
+        return "limited" if mode == "check" else "repaired_limited"
+    if rc >= 8:
+        return "failed"
+    if rc & 4:
+        return "errors" if mode == "check" else "errors_left"
+    dirty = bool(flags_after and flags_after[0])
+    if mode == "check":
+        if dirty:
+            return "dirty"
+        return "errors" if rc else "clean"
+    return "repair_incomplete" if dirty else "repaired"
+
+
+def stats(output):
+    """Nur Zahlen, nie Dateinamen: Das landet auch im Fehlerbericht."""
+    found = {}
+    if m := re.search(r"directories (\d+), files (\d+)", output):
+        found.update(directories=int(m.group(1)), files=int(m.group(2)))
+    if m := re.search(r"files corrupted (\d+), files fixed (\d+)", output):
+        found.update(corrupted=int(m.group(1)), fixed=int(m.group(2)))
+    return found
+
+
+def stopping():
+    return term or out("systemctl", "is-system-running") == "stopping"
+
+
+def warning_after_mount(source, since):
+    """Hat der Kernel beim Einhängen eben wieder gewarnt? None: nicht feststellbar."""
+    res = sh("journalctl", "-k", f"--since=@{int(since) - 1}", "--no-pager", "-q", "-o", "cat")
+    if not res or res.returncode != 0:
+        return None
+    name = source.rsplit("/", 1)[-1]
+    return any("not properly unmounted" in line and name in line for line in res.stdout.splitlines())
+
+
+def recover(data, st):
+    """Platte wieder einhängen und Netzlaufwerk starten. Läuft immer, auch nach jedem Fehler."""
+    if stopping():
+        # Beim Herunterfahren lässt systemd nichts mehr starten; beim nächsten Start hängt fstab die Platte ein
+        st["remounted"] = None
+        return
+    since = time.time()
+    mounted = os.path.ismount(data)
+    for attempt in range(3):
+        if mounted:
+            break
+        if attempt:
+            time.sleep(3)
+        res = sh("mount", data, timeout=300)
+        mounted = bool(res and res.returncode == 0) or os.path.ismount(data)
+    st["remounted"] = mounted
+    if mounted:
+        if st.get("fstype") == "exfat" and st.get("source"):
+            st["warning_after"] = warning_after_mount(st["source"], since)
+        sh("systemctl", "start", "smbd", timeout=120)
+        return
+    # Ohne Platte kein Netzlaufwerk und keine Dateien: Sonst landet alles auf der SD-Karte unter dem leeren Ordner
+    st["mount_failed"] = True
+    os.makedirs(RUN_DIR, exist_ok=True)
+    os.chmod(RUN_DIR, 0o755)
+    with open(DISK_OFF, "w") as f:
+        f.write(str(int(time.time())))
+    os.chmod(DISK_OFF, 0o644)
+
+
+def run():
+    global term, cancel
+    req = load(FLAG)
+    if not req:
+        return
+    mode = req.get("mode") if req.get("mode") in ("check", "repair") else "check"
+    st = {"state": "running", "mode": mode, "phase": "stopping", "started": time.time(), "boot": boot_id()}
+    data = data_dir()
+    try:
+        save_status(st)
+        source, fstype = locate(data)
+        st.update(source=source, fstype=fstype)
+        save_status(st)
+        unmount(data, source, fstype)
+        before = read_flags(source) if fstype == "exfat" else None
+        st.update(phase="checking" if mode == "check" else "repairing",
+                  dirty_before=before[0] if before else None, media_failure=before[1] if before else None)
+        save_status(st)
+        rc, output = run_tool(tool_command(fstype, mode, source), mode)
+        st.update(exit_code=rc, output=output, stats=stats(output))
+        if rc is None:
+            st["outcome"] = "cancelled"
+        else:
+            after = read_flags(source) if fstype == "exfat" else None
+            st["dirty_after"] = after[0] if after else None
+            st["outcome"] = classify(fstype, mode, rc, after)
+    except CheckError as exc:
+        st.update(outcome="failed", message=str(exc))
+    except Exception as exc:  # noqa: BLE001 – die Platte muss trotzdem wieder eingehängt werden
+        print(f"Unerwarteter Fehler: {exc!r}", file=sys.stderr)
+        st.update(outcome="failed", message="Bei der Prüfung ist ein unerwarteter Fehler aufgetreten.")
+    finally:
+        st["phase"] = "remounting"
+        try:
+            save_status(st)
+            recover(data, st)
+        finally:
+            st.update(state="done", finished=time.time())
+            save_status(st)
+            remove_flag()
+
+
+def finish():
+    """Falls --run hart beendet wurde: Der Merker steht noch und die Platte ist womöglich ausgehängt."""
+    if not os.path.exists(FLAG):
+        return
+    st = load(STATUS)
+    st.update(state="done", outcome="failed", finished=time.time(), message="Der Prüfdienst wurde unerwartet beendet.")
+    try:
+        recover(data_dir(), st)
+    finally:
+        save_status(st)
+        remove_flag()
+
+
+def _on_term(_signum, _frame):
+    global term
+    term = True
+
+
+def _on_cancel(_signum, _frame):
+    global cancel
+    cancel = True
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    try:
+        if cmd == "--start" and len(sys.argv) == 3 and sys.argv[2] in ("check", "repair"):
+            start(sys.argv[2])
+        elif cmd == "--cancel":
+            cancel_check()
+        elif cmd == "--run":
+            signal.signal(signal.SIGTERM, _on_term)
+            signal.signal(signal.SIGUSR1, _on_cancel)
+            run()
+        elif cmd == "--finish":
+            finish()
+        else:
+            print(__doc__, file=sys.stderr)
+            return 2
+    except CheckError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -12,6 +12,9 @@
 .xfer-x:hover { color: var(--text); }
 .xfer p { margin: 0; }
 .xfer-what { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xfer-note { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.xfer-note[hidden] { display: none; }
+.xfer-note button { padding: 0; font-size: inherit; text-decoration: underline; }
 .xfer-pct { font-size: 1.05rem; }
 .xfer-bar { height: 8px; overflow: hidden; background: var(--band); border-radius: var(--pill); }
 .xfer-bar span { display: block; width: 0; height: 100%; background: var(--accent); transition: width .2s; }
@@ -55,14 +58,69 @@
 .fv-where { display: block; grid-column: 1 / -1; min-width: 0; margin-top: -.3rem; padding: 0 .5rem .35rem calc(var(--ic) + 1.1rem);
             overflow: hidden; color: var(--muted); font-size: .82rem; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .fv-where:hover { color: var(--accent); text-decoration: underline; }
-[data-view=details] .fv-where { padding: 0 0 .5rem calc(var(--ic) + .6rem); }
-[data-view=content] .fv-where { padding: 0 0 .6rem calc(var(--ic) + .9rem); }
-[data-view=tiles] .fv-where { padding: 0 .6rem .6rem calc(var(--ic) + 1.4rem); }
+.fv-where { padding-left: calc(var(--ic) + 2.5rem); }
+[data-view=details] .fv-where { padding: 0 0 .5rem calc(var(--ic) + 2.2rem); }
+[data-view=content] .fv-where { padding: 0 0 .6rem calc(var(--ic) + 2.5rem); }
+[data-view=tiles] .fv-where { padding: 0 .6rem .6rem calc(var(--ic) + 2.7rem); }
 :is([data-view=medium], [data-view=large], [data-view=xl]) .fv-where { padding: 0 .4rem .4rem; text-align: center; }
 @media (max-width: 640px) {
   .fsearch :is(select, button) { flex: 1 1 auto; }
   /* Beim Suchen zählt der Name: lieber umbrechen als abschneiden */
   .fv-item:has(.fv-where) .fv-name { white-space: normal; overflow-wrap: anywhere; }
+}
+
+/* Auswählen: Das Kästchen liegt über dem Eintrag und ist immer sichtbar, Touchscreens kennen kein Überfahren */
+.fv-check { position: absolute; z-index: 1; left: .4rem; top: calc(var(--check-pad, .35rem) + max(var(--ic), 1.5rem) / 2); transform: translateY(-50%);
+            display: flex; align-items: center; justify-content: center; width: 1.3rem; height: 1.3rem; margin: 0; cursor: pointer; opacity: .6; }
+.fv-check input { width: 1rem; height: 1rem; margin: 0; padding: 0; accent-color: var(--accent); cursor: pointer; }
+.fv-item:hover .fv-check, .fv-check:has(:checked), .fv-check:has(:focus-visible) { opacity: 1; }
+.fv-main { padding-left: 2rem; }
+.fv-item.fv-selected, .fv-item.fv-selected:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+[data-view=list] .fv-check { --check-pad: .25rem; }
+[data-view=tiles] .fv-check { --check-pad: .6rem; }
+:is([data-view=list], [data-view=tiles]) .fv-main { padding-left: 2rem; }
+[data-view=details] .fv-head { position: relative; }
+[data-view=details] .fv-head .fv-check { left: 1rem; top: 50%; }
+[data-view=details] .fv-head [data-sort=name] { padding-left: 1.7rem; }
+[data-view=details] .fv-check { --check-pad: .55rem; left: 1rem; }
+[data-view=details] .fv-main { padding-left: 1.7rem; }
+[data-view=content] .fv-check { --check-pad: .6rem; left: 1rem; }
+[data-view=content] .fv-main { padding-left: 1.7rem; }
+/* Symbole: oben links in der Ecke, mit Hintergrund, damit das Kästchen auch auf einem Bild zu sehen ist */
+:is([data-view=medium], [data-view=large], [data-view=xl]) .fv-check { left: .3rem; top: .3rem; transform: none; border-radius: 4px; background: var(--surface); }
+/* Leiste zur Auswahl: bleibt beim Blättern in einer langen Liste am unteren Rand */
+.fpick { position: sticky; bottom: .75rem; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; margin-top: .75rem; padding: .6rem .9rem;
+         background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 6px 20px rgba(0, 0, 0, .15); }
+.fpick[hidden] { display: none; }
+#pick-count { flex: 1 1 10rem; font-variant-numeric: tabular-nums; }
+/* Bearbeiten (fileedit.js) */
+.fv-item.fv-cut { opacity: .5; }
+.fv-item.fv-over { background: color-mix(in srgb, var(--accent) 22%, transparent); outline: 2px solid var(--accent); outline-offset: -2px; }
+.edit-dialog { border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; width: min(480px, calc(100vw - 32px)); background: var(--surface); color: var(--text); }
+.edit-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.edit-dialog h3 { margin: 0 0 .75rem; font-size: 1.2rem; font-weight: 600; overflow-wrap: anywhere; }
+.edit-dialog select { width: auto; max-width: 100%; }
+.edit-dialog p { overflow-wrap: anywhere; }
+.edit-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+.edit-path { margin: .6rem 0; overflow-wrap: anywhere; }
+.edit-folders { display: grid; gap: .15rem; max-height: 40vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: .3rem; min-height: 4rem; }
+.edit-folders button { border: 0; background: none; color: var(--text); text-align: left; font-weight: 400; padding: .35rem .6rem; border-radius: 6px; overflow-wrap: anywhere; }
+.edit-folders button:hover { background: var(--hover); }
+.edit-folders p { margin: .5rem; }
+.edit-share { display: grid; gap: .5rem; }
+.edit-share label { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: 0; }
+.share-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.share-list li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.share-list small { display: block; color: var(--muted); overflow-wrap: anywhere; }
+/* Texteditor */
+.editor .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-bottom: .75rem; }
+.editor b { overflow-wrap: anywhere; }
+.editor textarea { display: block; width: 100%; box-sizing: border-box; min-height: 65vh; resize: vertical; padding: .8rem; font: 14px/1.5 ui-monospace, Consolas, Menlo, monospace;
+                   background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; white-space: pre; overflow: auto; }
+@media (max-width: 640px) {
+  [data-view=details] .fv-check, [data-view=content] .fv-check, [data-view=details] .fv-head .fv-check { left: .6rem; }
+  #pick-count { flex-basis: 100%; }
+  .fpick button { flex: 1 1 0; padding-left: .5rem; padding-right: .5rem; white-space: nowrap; }
 }
 
 /* Gesperrt, solange übertragen wird (Abmelden, Herunterfahren, Neustart) */

@@ -2,10 +2,14 @@
 import json
 import os
 import re
+import threading
+import time
 from datetime import datetime
+from pathlib import Path
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 
+from . import crashlog, events, transfers
 from .auth import admin_required, helper
 from .config import shared_mode
 from .dashboard import _cmd, block_devices, disk_names, save_disk_names, system_disk
@@ -59,15 +63,170 @@ def power_status() -> dict | None:
     return st
 
 
+# ---------------------------------------------------------------- Festplatte prüfen (Dienst pinas-diskcheck)
+
+CHECK_FLAG = Path("/run/pinas-disk-check")  # da = Prüfung läuft, verschwindet auch bei jedem Neustart
+CHECK_REPAIRABLE = ("dirty", "errors")
+CHECK_PHASES = {"starting": "Prüfung wird gestartet …", "stopping": "Netzlaufwerk wird gestoppt, Festplatte wird ausgehängt …",
+                "checking": "Festplatte wird geprüft. Dabei wird nichts verändert.",
+                "repairing": "Festplatte wird repariert. Bitte den Strom nicht trennen.",
+                "remounting": "Festplatte wird wieder eingehängt, Netzlaufwerk wird gestartet …"}
+# Ergebnis → (Art: ok/warn/bad, Überschrift, Erklärung)
+CHECK_OUTCOMES = {
+    "clean": ("ok", "Alles in Ordnung", "Die Prüfung hat keine Fehler gefunden."),
+    "limited": ("ok", "Keine groben Fehler gefunden",
+                "Für Windows-Platten (NTFS) gibt es unter Linux nur eine einfache Prüfung. Sie ersetzt kein chkdsk. "
+                "Gründlich geht es nur an einem Windows-PC mit „chkdsk /f“."),
+    "dirty": ("warn", "Keine Dateifehler, aber die Platte gilt noch als „nicht sauber getrennt“",
+              "Die Markierung stammt meist von einem früheren Stromausfall oder Abziehen der Platte. Sie bleibt stehen, bis sie "
+              "repariert wird, darum meldet das System die Warnung bei jedem Start erneut, auch wenn du sauber herunterfährst. "
+              "„Reparieren“ prüft noch einmal und entfernt die Markierung."),
+    "errors": ("bad", "Fehler gefunden", "Auf der Platte stimmt etwas nicht. Es wurde noch nichts verändert. Unten kannst du die Reparatur starten."),
+    "repaired": ("ok", "Repariert", "Die Reparatur ist abgeschlossen, die Markierung „nicht sauber getrennt“ ist weg."),
+    "repaired_limited": ("warn", "Einfache Reparatur abgeschlossen",
+                         "Unter Linux lassen sich auf Windows-Platten (NTFS) nur grundlegende Fehler beheben. "
+                         "Das ist keine vollständige Reparatur. Gründlich geht es nur an einem Windows-PC mit „chkdsk /f“."),
+    "repair_incomplete": ("bad", "Reparatur nicht vollständig", "Das Prüfprogramm meldet Erfolg, aber die Markierung „nicht sauber getrennt“ ist noch da."),
+    "errors_left": ("bad", "Es sind noch Fehler übrig", "Die Reparatur konnte nicht alles beheben. Bitte sichere deine wichtigen Daten auf eine andere Platte."),
+    "failed": ("bad", "Prüfung fehlgeschlagen", "Die Prüfung konnte nicht zu Ende geführt werden."),
+    "cancelled": ("warn", "Prüfung abgebrochen", "Die Prüfung wurde abgebrochen. Es wurde nichts verändert."),
+    "interrupted": ("bad", "Prüfung wurde unterbrochen", "Der Pi wurde währenddessen neu gestartet oder hat den Strom verloren. Bitte noch einmal prüfen."),
+}
+
+
+def check_view(cfg) -> dict | None:
+    """Stand der Prüfung für die Anzeige. None: noch nie geprüft."""
+    try:
+        st = json.loads((cfg["DB_PATH"].parent / "disk-check.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    running = CHECK_FLAG.exists()
+    if running and st.get("state") != "running":
+        try:  # Dienst startet gerade und hat noch nichts geschrieben
+            req = json.loads(CHECK_FLAG.read_text())
+        except (OSError, ValueError):
+            req = {}
+        st = {"state": "running", "mode": req.get("mode", "check"), "phase": "starting", "started": req.get("at")}
+    elif not running and st.get("state") == "running":
+        st = {**st, "state": "done", "outcome": "interrupted"}
+    if not st:
+        return None
+    st["running"] = running
+    if running:
+        st["phase_text"] = CHECK_PHASES.get(st.get("phase"), CHECK_PHASES["starting"])
+    else:
+        st["kind"], st["title"], st["text"] = CHECK_OUTCOMES.get(st.get("outcome"), CHECK_OUTCOMES["failed"])
+        st["can_repair"] = st.get("mode") == "check" and st.get("outcome") in CHECK_REPAIRABLE
+    for key in ("started", "finished"):
+        st[f"{key}_text"] = datetime.fromtimestamp(st[key]).strftime("%d.%m.%Y, %H:%M Uhr") if st.get(key) else ""
+    if st.get("started") and st.get("finished"):
+        st["minutes"] = max(1, round((st["finished"] - st["started"]) / 60))
+    return st
+
+
+def note_check_result(cfg) -> None:
+    """Ein fertiges Ergebnis einmal ins Ereignis-Protokoll und, wenn es nicht glatt lief, ins Fehlerprotokoll schreiben."""
+    st = check_view(cfg)
+    if not st or st["running"]:
+        return
+    marker = cfg["DB_PATH"].parent / "disk-check.noted"
+    stamp = str(st.get("started"))
+    try:
+        if marker.read_text() == stamp:
+            return
+    except OSError:
+        pass
+    marker.write_text(stamp)
+    what = "Reparatur" if st.get("mode") == "repair" else "Prüfung"
+    detail = f"{what}: {st['title']}" + (f" ({st.get('fstype')})" if st.get("fstype") else "")
+    if st.get("mount_failed"):
+        detail += ". Die Platte ließ sich danach nicht wieder einhängen"
+    if events.enabled(cfg):
+        events.log_system(cfg, {"ok": "disk_ok", "warn": "disk_warn", "bad": "disk_bad"}[st["kind"]], detail)
+    if st["kind"] != "ok" or st.get("mount_failed") or st.get("warning_after") and st.get("mode") == "repair":
+        # Ohne die Ausgabe des Prüfprogramms: Sie kann Dateinamen nennen
+        facts = {k: st[k] for k in ("mode", "outcome", "fstype", "exit_code", "dirty_before", "dirty_after", "media_failure",
+                                    "warning_after", "remounted", "stats", "message") if k in st}
+        crashlog.record("disk", f"Festplatte: {detail}", json.dumps(facts, ensure_ascii=False),
+                        level="error" if st["kind"] == "bad" or st.get("mount_failed") else "warn", key=f"diskcheck|{stamp}")
+
+
+def start_check_watch(app, interval: int = 30) -> None:
+    """Schreibt das Ergebnis auch dann auf, wenn gerade niemand die Seite offen hat."""
+    def loop():
+        while True:
+            try:
+                note_check_result(app.config)
+            except Exception:  # noqa: BLE001 – der Hintergrund-Thread darf nie abbrechen
+                app.logger.exception("Festplatten-Prüfung: Ergebnis konnte nicht notiert werden")
+            time.sleep(interval)
+
+    threading.Thread(target=loop, name="pinas-diskcheck", daemon=True).start()
+
+
+def _start_check(action: str, message: str) -> None:
+    running = transfers.busy()
+    if running:
+        flash(transfers.describe(running), "error")
+        return
+    try:
+        helper().disk_check(action)
+        events.log("setting", message)
+        flash(f"{message}. Du kannst diese Seite schließen, das läuft im Hintergrund weiter.", "ok")
+    except HelperError as exc:
+        flash(str(exc), "error")
+
+
+@bp.post("/pruefen")
+@admin_required
+def check():
+    _start_check("check", "Festplatten-Prüfung gestartet")
+    return redirect(url_for("disk.index") + "#pruefung")
+
+
+@bp.post("/reparieren")
+@admin_required
+def repair():
+    st = check_view(current_app.config)
+    if not st or not st.get("can_repair"):
+        flash("Bitte zuerst prüfen. Repariert wird nur, wenn die letzte Prüfung etwas gefunden hat.", "error")
+    elif request.form.get("confirm", "").strip().lower() != "reparieren":
+        flash("Zum Reparieren bitte das Wort „reparieren“ eintippen.", "error")
+    else:
+        _start_check("repair", "Festplatten-Reparatur gestartet")
+    return redirect(url_for("disk.index") + "#pruefung")
+
+
+@bp.post("/pruefung-abbrechen")
+@admin_required
+def check_cancel():
+    try:
+        helper().disk_check("cancel")
+        flash("Die Prüfung wird abgebrochen.", "ok")
+    except HelperError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("disk.index") + "#pruefung")
+
+
+@bp.get("/pruefung-status")
+@admin_required
+def check_status():
+    st = check_view(current_app.config) or {}
+    return jsonify(running=st.get("running", False), phase=st.get("phase_text", ""))
+
+
 @bp.get("/")
 @admin_required
 def index():
     disks = candidates()
     aliases = {d["name"]: d["alias"] for d in disks}
+    data_dir = str(current_app.config["DATA_DIR"])
     return render_template("disk.html", disks=disks, source=data_source(), fstype=data_fstype(),
                            layout=shared_mode(), data_dir=current_app.config["DATA_DIR"],
                            power=_read_json("disk-power.json", POWER_DEFAULTS),
-                           power_status=power_status(), idle_choices=IDLE_CHOICES, aliases=aliases)
+                           power_status=power_status(), idle_choices=IDLE_CHOICES, aliases=aliases,
+                           check=check_view(current_app.config),
+                           disk_in_fstab=bool(_cmd("findmnt", "--fstab", "-no", "SOURCE", data_dir)))
 
 
 @bp.post("/aufteilung")

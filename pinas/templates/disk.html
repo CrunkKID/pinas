@@ -8,13 +8,17 @@
 {% endblock %}
 {% block content %}
 
-{% if source %}
+{% set checking = check and check.running %}
+{% if checking %}
+<div class="flash error">Die Festplatte wird gerade geprüft und ist dafür ausgehängt. Netzlaufwerk und Dateien sind so lange nicht erreichbar.</div>
+{% elif source %}
 <div class="flash ok">NAS-Speicher: <b>{{ source }}</b>{% if fstype %} ({{ fstype }}){% endif %} ist unter {{ data_dir }} eingehängt.</div>
 {% else %}
 <div class="flash error">Noch keine Festplatte eingerichtet – Daten liegen auf der SD-Karte.
   Schließe eine USB-Platte an und wähle sie unten aus.</div>
 {% endif %}
 
+{% if not checking %}
 {% for d in disks %}
 <div class="card">
   <div class="disk-head">
@@ -81,8 +85,70 @@
 <p class="muted">„Verwenden“ übernimmt eine Platte <b>ohne Formatieren</b> – auch NTFS- und exFAT-Platten vom
   Windows-PC. Dateien, die bisher auf der SD-Karte lagen, werden beim Einrichten auf die Platte kopiert.
   Windows-Platten vorher am PC mit „Hardware sicher entfernen“ abmelden.</p>
+{% endif %}
 
-{% if source %}
+{% if source or disk_in_fstab or check %}
+<link rel="stylesheet" href="{{ url_for('static', filename='diskcheck.css') }}">
+<h2 id="pruefung">Festplatte prüfen</h2>
+<div class="card check-card">
+  {% if checking %}
+  <p class="check-now" id="check-running" data-status="{{ url_for('disk.check_status') }}">
+    <span class="check-spin" aria-hidden="true"></span>
+    <b id="check-phase">{{ check.phase_text }}</b>
+  </p>
+  <p class="muted">{{ 'Reparatur' if check.mode == 'repair' else 'Prüfung' }}{% if check.started_text %} läuft seit {{ check.started_text }}{% endif %}.
+    Je nach Anzahl der Dateien dauert das Minuten bis Stunden. Einen Fortschritt in Prozent liefern die Prüfprogramme nicht.
+    Du kannst diese Seite schließen, das läuft im Hintergrund weiter. Danach starten Netzlaufwerk und Dateien von selbst wieder.</p>
+  {% if check.mode == 'check' %}
+  <form method="post" action="{{ url_for('disk.check_cancel') }}" class="inline"
+        data-confirm="Die Prüfung endet ohne Ergebnis. Es wurde nichts verändert, die Platte wird wieder eingehängt."
+        data-confirm-title="Prüfung abbrechen?" data-confirm-ok="Abbrechen">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn-sm">Prüfung abbrechen</button>
+  </form>
+  {% endif %}
+  {% else %}
+  {% if check %}
+  <div class="check-result {{ check.kind }}">
+    <b>{{ check.title }}</b>
+    <p>{{ check.text }}</p>
+    {% if check.message %}<p>{{ check.message }}</p>{% endif %}
+    {% if check.media_failure %}<p><b>Die Platte selbst meldet Medienfehler.</b> Das kann eine Reparatur nicht beheben. Sichere deine wichtigen Daten bald auf eine andere Platte.</p>{% endif %}
+    {% if check.mount_failed %}<p><b>Die Platte ließ sich danach nicht wieder einhängen.</b> Sie gilt jetzt als ausgeschaltet. Versuche im Dashboard „Festplatte einschalten“ oder starte PiNAS neu.</p>
+    {% elif check.mode == 'repair' and check.warning_after %}<p><b>Beim Einhängen eben kam die Warnung „nicht sauber getrennt“ trotzdem wieder.</b> Bitte schick den Fehlerbericht an Claude.</p>
+    {% elif check.mode == 'repair' and check.warning_after == false %}<p>Beim Einhängen eben kam die Warnung „nicht sauber getrennt“ nicht mehr.</p>{% endif %}
+    <small class="muted">{{ 'Reparatur' if check.mode == 'repair' else 'Prüfung' }} vom {{ check.finished_text or check.started_text }}{% if check.minutes %}, Dauer etwa {{ check.minutes }} Minute{{ 'n' if check.minutes != 1 }}{% endif %}{% if check.stats and check.stats.files is defined %}, {{ check.stats.files }} Dateien in {{ check.stats.directories }} Ordnern{% endif %}</small>
+    {% if check.output %}
+    <details class="check-output"><summary>Ausgabe des Prüfprogramms</summary><pre>{{ check.output }}</pre></details>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if check and check.can_repair %}
+  <form method="post" action="{{ url_for('disk.repair') }}" class="repair-form"
+        data-confirm="Die Reparatur verändert die Verwaltungsdaten der Platte und lässt sich nicht rückgängig machen. Beschädigte Dateien können dabei gekürzt oder entfernt werden. Bitte den Strom währenddessen nicht trennen."
+        data-confirm-title="Wirklich reparieren?" data-confirm-ok="Jetzt reparieren" data-confirm-danger>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="repair-label">Reparieren schreibt auf die Platte. Sind dir die Daten wichtig, sichere sie vorher, solange sie noch lesbar sind. Zum Bestätigen das Wort <b>reparieren</b> eintippen:
+      <input name="confirm" class="repair-word" autocomplete="off" autocapitalize="none" spellcheck="false"
+             placeholder="reparieren" required pattern="\s*[Rr][Ee][Pp][Aa][Rr][Ii][Ee][Rr][Ee][Nn]\s*"
+             title="Bitte das Wort „reparieren“ eintippen"></label>
+    <button class="danger repair-btn" disabled>Reparieren</button>
+  </form>
+  {% endif %}
+  <p class="muted">Prüft das Dateisystem der NAS-Platte, ohne etwas zu verändern. Repariert wird nur, wenn du das danach ausdrücklich bestätigst.
+    Dafür wird die Platte ausgehängt: Netzlaufwerk und Dateien sind währenddessen nicht erreichbar, das kann Minuten bis Stunden dauern.
+    Bei Windows-Platten (NTFS) ist unter Linux nur eine einfache Prüfung möglich.</p>
+  <form method="post" action="{{ url_for('disk.check') }}" class="inline"
+        data-confirm="Netzlaufwerk und Dateien sind während der Prüfung nicht erreichbar, das kann Minuten bis Stunden dauern. Es wird nichts verändert."
+        data-confirm-title="Festplatte jetzt prüfen?" data-confirm-ok="Prüfen">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="primary">Festplatte prüfen</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if source and not checking %}
 <h2 id="aufteilung">Ordner-Aufteilung</h2>
 <form method="post" action="{{ url_for('disk.layout') }}" class="card layout-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -168,5 +234,26 @@
       btn.disabled = word.value.trim().toLowerCase() !== "formatieren";
     });
   });
+  // Reparieren-Knopf ebenso erst nach dem eingetippten Wort
+  document.querySelectorAll(".repair-form").forEach((f) => {
+    const word = f.querySelector(".repair-word");
+    const btn = f.querySelector(".repair-btn");
+    word.addEventListener("input", () => {
+      btn.disabled = word.value.trim().toLowerCase() !== "reparieren";
+    });
+  });
+  // Laufende Prüfung: Stand nachladen, am Ende die Seite mit dem Ergebnis neu laden
+  const checkRunning = document.getElementById("check-running");
+  if (checkRunning) {
+    setInterval(async () => {
+      try {
+        const r = await fetch(checkRunning.dataset.status, { cache: "no-store" });
+        if (!r.ok) return;
+        const st = await r.json();
+        if (!st.running) location.reload();
+        else if (st.phase) document.getElementById("check-phase").textContent = st.phase;
+      } catch { /* PiNAS kurz nicht erreichbar: beim nächsten Mal wieder versuchen */ }
+    }, 5000);
+  }
 </script>
 {% endblock %}

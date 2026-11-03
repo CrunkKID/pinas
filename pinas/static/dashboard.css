@@ -1,9 +1,23 @@
 /* Kacheln im Dashboard: überall dieselbe Ordnung. Oben der Titel, darunter der große Wert,
    unten bündig die Zeilen „Bezeichnung – Wert“, die nicht umbrechen. */
-.dash-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-@media (max-width: 1100px) { .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .dash-grid { grid-template-columns: minmax(0, 1fr); } }
-@media (min-width: 641px) { .dash-grid .disk-card { grid-column: span 2; } }
+/* Spalten so, dass keine Lücke bleibt: 8 Kacheln gehen in 2 und 4 Spalten auf, in 3 Spalten ist „Festplatte“ doppelt breit.
+   Die Seite ist je Spaltenzahl begrenzt (Kachel höchstens 340 px), damit auch die Bereiche darunter bündig enden. */
+.dash-grid { grid-template-columns: minmax(0, 1fr); }
+.dash-grid .disk-card { grid-column: auto; }
+@media (min-width: 560px) {
+  .dash-page { max-width: calc(696px + 2 * var(--gutter)); }
+  .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1030px) {
+  .dash-page { max-width: calc(1052px + 2 * var(--gutter)); }
+  .dash-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dash-grid .disk-card { grid-column: span 2; }
+}
+@media (min-width: 1500px) {
+  .dash-page { max-width: calc(1408px + 2 * var(--gutter)); }
+  .dash-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .dash-grid .disk-card { grid-column: auto; }
+}
 
 .dash-grid .stat { display: flex; flex-direction: column; gap: .5rem; }
 .dash-grid .stat > small:first-of-type { margin-bottom: .1rem; font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
@@ -27,8 +41,10 @@
 .dash-grid .io strong { font-size: 1.4rem; }
 .io-label { font-size: .85rem; color: var(--muted); white-space: nowrap; }
 
-.dash-grid .disk-chart { margin: auto 0; }
-.dash-grid .disk-legend { font-size: .85rem; }
+.dash-grid .disk-chart { margin: auto 0; gap: .75rem; justify-content: center; }
+.dash-grid .donut { width: 96px; height: 96px; }
+.dash-grid .disk-legend { font-size: .85rem; flex-basis: 120px; }
+.dash-grid .disk-legend div { gap: .5rem; }
 .dash-grid .disk-legend dd { white-space: nowrap; }
 .dash-grid .disk-legend dt { white-space: nowrap; }
 

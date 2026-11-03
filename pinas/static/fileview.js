@@ -61,6 +61,7 @@
     check("[data-toggle]", (b) => !!state[b.dataset.toggle]);
     sortItems();
     loadThumbs();
+    window.PiNASFiles?.sizes();
   }
 
   function closeMenus(except) {
@@ -101,16 +102,29 @@
     if (item) {
       const q = (s) => item.querySelector(s);
       const isDir = item.dataset.dir === "1";
+      const selected = zone.querySelectorAll(".fv-selected").length;
+      if (item.classList.contains("fv-selected") && selected > 1) {
+        entries.push({ label: `${selected} ausgewählte herunterladen`, run: () => document.getElementById("pick-download").click() }, "-");
+      }
       entries.push({ label: isDir ? "Öffnen" : "Öffnen (neuer Tab)", run: () => q(".fv-main").click() });
       if (q(".fv-where")) entries.push({ label: "Speicherort öffnen", run: () => q(".fv-where").click() });
       entries.push({ label: isDir ? "Als ZIP herunterladen" : "Herunterladen", run: () => q("[data-download]").click() });
-      entries.push("-",
-        { label: "Umbenennen", run: () => q("[data-rename]").click() },
-        { label: "Löschen", danger: true, run: () => q("[data-delete]").click() });
+      entries.push("-", ...(window.PiNASEdit?.itemEntries(item) || []));
+      if (q("[data-rename]")) {  // fehlen bei „nur ansehen“
+        const many = item.classList.contains("fv-selected") && selected > 1;
+        entries.push("-");
+        if (!many) entries.push({ label: "Umbenennen", run: () => q("[data-rename]").click() });
+        entries.push(many ? { label: `Löschen (${selected})`, danger: true, run: () => window.PiNASEdit.removeSelected() }
+                          : { label: "Löschen", danger: true, run: () => q("[data-delete]").click() });
+      }
     } else {
-      entries.push(
-        { label: "Hochladen …", run: () => document.getElementById("file-input").click() },
-        { label: "Neuer Ordner", run: () => document.getElementById("mkdir-btn").click() });
+      if (zone.dataset.writable === "1") {
+        entries.push(
+          { label: "Hochladen …", run: () => document.getElementById("file-input").click() },
+          { label: "Neuer Ordner", run: () => document.getElementById("mkdir-btn").click() });
+      }
+      entries.push(...(window.PiNASEdit?.blankEntries() || []));
+      if (!entries.length) return;
     }
     e.preventDefault();
     openCtx(e.clientX, e.clientY, entries);
@@ -147,6 +161,6 @@
   addEventListener("resize", closeCtx);
   addEventListener("scroll", closeCtx, true);
 
-  window.PiNASView = { refresh: apply };
+  window.PiNASView = { refresh: apply, sizeChanged: () => { if (state.sort === "size") sortItems(); } };
   apply();
 })();

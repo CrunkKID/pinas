@@ -15,9 +15,9 @@ from urllib.parse import quote
 from flask import (Blueprint, abort, current_app, flash, g, jsonify, make_response, redirect,
                    render_template, request, send_file, url_for)
 
-from . import events, private, quota, transfers
+from . import events, private, quota, shares, transfers
 from .auth import login_required
-from .config import TRASH_NAME, storage
+from .config import TRASH_NAME, disk_is_off, storage
 
 bp = Blueprint("files", __name__)
 
@@ -28,6 +28,13 @@ _SYNC_EVERY = 64 * 1024 * 1024
 _SEARCH_MAX_HITS = 500
 _SEARCH_MAX_SECONDS = 30
 _SEARCH_MIN_CHARS = 2
+_SIZE_WAIT = 2  # so lange wartet eine Anfrage auf das Ergebnis, danach antwortet sie mit dem Zwischenstand
+_SIZE_WALKS = 2  # höchstens so viele Ordner gleichzeitig durchzählen, die Platte hat auch anderes zu tun
+_SIZE_IDLE = 15  # niemand fragt mehr nach (Seite verlassen): aufhören
+_SIZE_KEEP = 300  # Ergebnis merken, wenn das Zählen merklich gedauert hat
+_SIZE_SLOW = 1
+_SELECTION_KEEP = 3600
+_SELECTION_MAX = 50
 
 # Dateiart für Symbolfarbe, Vorschaubild und die Spalte „Typ“ (wie im Windows-Explorer)
 _KINDS = {
@@ -59,6 +66,9 @@ _INLINE_TYPES = {
     "conf": _TEXT, "py": _TEXT, "js": _TEXT, "css": _TEXT, "sh": _TEXT, "bat": _TEXT, "ps1": _TEXT, "c": _TEXT,
     "cpp": _TEXT, "java": _TEXT,
 }
+# Lassen sich im Browser ändern (fileops.py)
+TEXT_EXTS = {ext for ext, kind in _INLINE_TYPES.items() if kind == _TEXT} | {"xml", "html", "htm", "tsv"}
+TEXT_MAX = 2 * 1024 * 1024
 # Für alles andere, falls ein Browser es trotzdem öffnet: keine Skripte, kein Zugriff auf PiNAS
 _DOWNLOAD_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
 
@@ -80,6 +90,46 @@ def user_roots() -> dict:
     if private.enabled(g.user["username"]):
         return ROOTS
     return {k: v for k, v in ROOTS.items() if k != "privat"}
+
+
+def all_roots() -> dict:
+    """Dazu die Ordner, die andere für diesen Benutzer freigegeben haben (Reiter im Bereich Dateien)."""
+    return {**user_roots(), **shares.for_me(g.user["username"])}
+
+
+def root_label(root: str) -> str:
+    return ROOTS.get(root) or (shares.access(root) or {}).get("label", root)
+
+
+def can_write(root: str) -> bool:
+    if root in ROOTS:
+        return True
+    info = shares.access(root)
+    return bool(info and info["can_write"])
+
+
+def quota_owner(root: str) -> str | None:
+    """Auf wessen Speicherlimit das hier zählt; „Gemeinsam“ hat keins."""
+    if root == "privat":
+        return g.user["username"]
+    info = shares.access(root)
+    return info["owner"] if info else None
+
+
+def trash_place(root: str, base: Path) -> tuple[str, Path]:
+    """Papierkorb für diesen Bereich. In einer Freigabe ist das der des Besitzers: Er kann alles zurückholen."""
+    info = shares.access(root)
+    if info:
+        return "privat", (storage(current_app.config)["users"] / info["owner"]).resolve()
+    return root, base
+
+
+@bp.before_request
+def _read_only_shares():
+    # An einer Stelle für alle Änderungen: Wer eine Freigabe nur ansehen darf, kommt mit POST nicht weiter
+    root = (request.view_args or {}).get("root")
+    if request.method == "POST" and request.endpoint != "files.selection" and shares.is_share_root(root) and not can_write(root):
+        abort(make_response(jsonify(error="Dieser Ordner ist für dich nur zum Ansehen freigegeben."), 403))
 
 
 @bp.app_context_processor
@@ -104,8 +154,11 @@ def is_hidden(name: str, hidden: frozenset) -> bool:
 
 
 def root_dir(root: str) -> Path:
+    # Festplatte wird geprüft und ist dafür ausgehängt: ebenso nichts auf die SD-Karte darunter schreiben
+    if Path("/run/pinas-disk-check").exists():
+        abort(503, "Die Festplatte wird gerade geprüft. Danach sind Dateien und Netzlaufwerk von selbst wieder da. Den Stand siehst du als Administrator unter „Laufwerk“.")
     # Festplatte im Dashboard ausgeschaltet: nichts auf die SD-Karte darunter schreiben
-    if Path("/run/pinas/disk-off").exists():
+    if disk_is_off(current_app.config):
         abort(503, "Die Festplatte ist ausgeschaltet. Im Dashboard oben rechts mit „Festplatte einschalten“ wieder aktivieren.")
     paths = storage(current_app.config)
     if root == "privat":
@@ -115,7 +168,10 @@ def root_dir(root: str) -> Path:
     elif root == "gemeinsam":
         base = paths["shared"]
     else:
-        abort(404)
+        info = shares.access(root)  # prüft auch, ob dieser Benutzer die Freigabe sehen darf
+        if not info:
+            abort(404)
+        return info["folder"].resolve()
     try:
         base.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -180,6 +236,7 @@ def _entry(base: Path, e: os.DirEntry) -> dict:
         "size": None if is_dir else st.st_size,
         "ts": int(st.st_mtime),
         "mtime": datetime.fromtimestamp(st.st_mtime).strftime("%d.%m.%Y %H:%M"),
+        "editable": not is_dir and st.st_size <= TEXT_MAX and Path(e.name).suffix[1:].lower() in TEXT_EXTS,
         **file_kind(e.name, is_dir),
     }
 
@@ -249,6 +306,85 @@ def _search(root: str, base: Path, start: Path, query: str) -> dict:
     return result
 
 
+# Ordnergrößen: Die Dateiliste wartet nicht darauf, jeder Ordner zählt in einem eigenen Faden und der Browser fragt
+# nach dem Stand. Das zählt, was auch ein ZIP dieses Ordners enthielte. Fertige Ergebnisse großer Ordner bleiben
+# kurz gemerkt; was über das Netzlaufwerk dazukommt, sieht man bei ihnen also erst nach höchstens _SIZE_KEEP Sekunden.
+_sizes: dict[str, dict] = {}
+_sizes_lock = threading.Lock()
+
+
+def _count_size(key: str, job: dict, folder: Path) -> None:
+    started = time.monotonic()
+    pending = [folder]
+    try:
+        while pending:
+            if time.monotonic() - job["asked"] > _SIZE_IDLE:
+                with _sizes_lock:
+                    if _sizes.get(key) is job:
+                        del _sizes[key]
+                return
+            try:
+                with os.scandir(pending.pop()) as it:
+                    for e in it:
+                        try:
+                            if e.name.startswith(".pinas-upload-") or e.is_symlink():
+                                continue
+                            if e.is_dir(follow_symlinks=False):
+                                pending.append(Path(e.path))
+                            elif e.is_file(follow_symlinks=False):
+                                job["size"] += e.stat(follow_symlinks=False).st_size
+                        except OSError:
+                            job["partial"] = True
+            except OSError:
+                job["partial"] = True  # Ordner nicht lesbar: Die Größe ist dann nur eine Untergrenze
+    finally:
+        took = time.monotonic() - started
+        job["until"] = time.monotonic() + (_SIZE_KEEP if took >= _SIZE_SLOW else 0)
+        job["finished"].set()
+
+
+def _folder_size(key: str, folder: Path) -> dict:
+    now = time.monotonic()
+    with _sizes_lock:
+        for k, j in list(_sizes.items()):
+            if j["finished"].is_set() and j["until"] <= now and k != key:
+                del _sizes[k]
+        job = _sizes.get(key)
+        if job and job["finished"].is_set() and job["until"] <= now:
+            job = None
+        if not job:
+            if sum(not j["finished"].is_set() for j in _sizes.values()) >= _SIZE_WALKS:
+                return {"size": 0, "partial": False, "finished": threading.Event()}  # gleich noch einmal fragen
+            job = {"size": 0, "partial": False, "asked": now, "until": 0, "finished": threading.Event()}
+            _sizes[key] = job
+            threading.Thread(target=_count_size, args=(key, job, folder), daemon=True).start()
+        job["asked"] = now
+    return job
+
+
+def forget_sizes() -> None:
+    """Nach einer Änderung: Gemerkte Größen stimmen vielleicht nicht mehr. Laufendes Zählen läuft zu Ende."""
+    with _sizes_lock:
+        for k, j in list(_sizes.items()):
+            if j["finished"].is_set():
+                del _sizes[k]
+
+
+@bp.get("/api/ordnergroesse/<root>/<path:sub>")
+@login_required
+def folder_size(root, sub):
+    _, target = resolve(root, sub)
+    if not target.is_dir():
+        abort(404)
+    job = _folder_size(str(target), target)
+    done = job["finished"].wait(_SIZE_WAIT)
+    # Erst nach dem Warten lesen, dann gehört auch das Ende des Zählens noch dazu
+    resp = jsonify(size=job["size"], text=current_app.jinja_env.filters["filesize"](job["size"]),
+                   done=done, partial=job["partial"])
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @bp.get("/dateien/<root>/")
 @bp.get("/dateien/<root>/<path:sub>")
 @login_required
@@ -261,9 +397,9 @@ def browse(root, sub=""):
         rng = request.headers.get("Range", "")
         if not rng or rng.startswith("bytes=0-"):
             if request.args.get("dl") == "1":
-                events.log("download", f"{ROOTS[root]}/{rel(base, target)}", events.size_of(target))
+                events.log("download", f"{root_label(root)}/{rel(base, target)}", events.size_of(target))
             elif request.headers.get("Sec-Fetch-Dest", "document") == "document":
-                events.log("open", f"{ROOTS[root]}/{rel(base, target)}", events.size_of(target))
+                events.log("open", f"{root_label(root)}/{rel(base, target)}", events.size_of(target))
         want_download = request.args.get("dl") == "1"
         ext = target.suffix[1:].lower()
         inline_type = _INLINE_TYPES.get(ext)
@@ -304,14 +440,17 @@ def browse(root, sub=""):
         crumbs.append((part, "/".join(acc)))
 
     usage = shutil.disk_usage(current_app.config["DATA_DIR"])
-    space = quota.info(g.user["username"]) if root == "privat" else None
+    owner = quota_owner(root)
+    space = quota.info(owner) if owner else None
     if space and space["limit"]:
         # Mit Speicherlimit zeigt „Privat“ den persönlichen Platz statt der ganzen Platte
         usage = SimpleNamespace(total=space["limit"], used=space["used"],
                                 free=min(space["free"], usage.free))
-    resp = make_response(render_template("files.html", root=root, roots=user_roots(), sub=rel(base, target),
+    shared = {s["path"] for s in shares.mine(g.user["username"])} if root == "privat" else set()
+    resp = make_response(render_template("files.html", root=root, roots=all_roots(), sub=rel(base, target),
                                          entries=entries, crumbs=crumbs, usage=usage, search=search,
-                                         quota_free=usage.free if space and space["limit"] else None))
+                                         quota_free=usage.free if space and space["limit"] else None,
+                                         writable=can_write(root), shared_paths=shared, text_max=TEXT_MAX))
     # Ordnerinhalt nie aus dem Browser-Cache anzeigen (sonst fehlen frisch hochgeladene Dateien)
     resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -416,7 +555,7 @@ def _zip_stream(items: list, skipped: list, entry: dict):
 
 
 def _zip_download(root: str, base: Path, target: Path):
-    name = target.name if target != base else ROOTS[root]
+    name = target.name if target != base else root_label(root)
     entry = transfers.begin("download", name, 0, tid=request.args.get("t", ""))
     try:
         hidden = hidden_names(root) if target == base else frozenset()
@@ -424,12 +563,105 @@ def _zip_download(root: str, base: Path, target: Path):
     except Exception:
         transfers.end(entry, remember=True)
         raise
-    events.log("download", f"{ROOTS[root]}/{rel(base, target)} (Ordner als ZIP)".replace("/ (", " ("), entry["size"])
+    events.log("download", f"{root_label(root)}/{rel(base, target)} (Ordner als ZIP)".replace("/ (", " ("), entry["size"])
+    return _zip_response(name, items, skipped, entry)
+
+
+def _zip_response(name: str, items: list, skipped: list, entry: dict):
     resp = current_app.response_class(_zip_stream(items, skipped, entry), mimetype="application/zip")
     resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name + '.zip')}"
     resp.headers["Cache-Control"] = "no-store"
+    resp.headers["X-PiNAS-Size"] = str(entry["size"])  # für den Fortschritt, die genaue ZIP-Größe gibt es noch nicht
     resp.call_on_close(lambda: transfers.end(entry, remember=True))
     return resp
+
+
+# Mehrere Einträge als ein ZIP. Der Browser meldet die Auswahl zuerst an und holt das ZIP dann über eine normale
+# Adresse: Die Auswahl kann für eine Adresse zu lang sein, und Browser und Android-App laden nur Adressen selbst herunter.
+_selections: dict[str, dict] = {}
+_selections_lock = threading.Lock()
+
+
+def _arc_name(name: str, used: set) -> str:
+    """Gleich heißende Einträge aus verschiedenen Ordnern (Suchtreffer) dürfen sich im ZIP nicht überschreiben.
+    Windows unterscheidet nicht nach Groß/Klein."""
+    stem, suffix = (Path(name).stem, Path(name).suffix)
+    arc, i = name, 1
+    while arc.casefold() in used:
+        i += 1
+        arc = f"{stem} ({i}){suffix}"
+    used.add(arc.casefold())
+    return arc
+
+
+def _selection_contents(root: str, paths: list, entry: dict) -> tuple[list, list]:
+    """Löst die Pfade neu auf: Die Prüfung gilt für jetzt, nicht für den Moment der Anmeldung. Liegt ein gewählter
+    Eintrag in einem ebenfalls gewählten Ordner, ist er über den Ordner schon dabei."""
+    base = root_dir(root)
+    chosen = {resolve(root, p)[1] for p in paths} - {base}
+    items, skipped, used = [], [], set()
+    for path in sorted(chosen, key=lambda p: p.name.casefold()):
+        if any(parent in chosen for parent in path.parents):
+            continue
+        arc = _arc_name(path.name, used)
+        try:
+            if path.is_dir():
+                more, missed = _zip_contents(path, arc, frozenset(), entry)
+                items += more
+                skipped += missed
+            elif path.is_file():
+                entry["size"] += path.stat().st_size
+                items.append((path, arc, False))
+            else:
+                skipped.append(arc)  # inzwischen weg
+        except OSError:
+            skipped.append(arc)
+    return items, skipped
+
+
+# Unter /api, nicht unter /dateien/<root>/: Dort wäre ein Ordner „auswahl“ nicht mehr zu öffnen
+@bp.post("/api/auswahl/<root>")
+@login_required
+def selection(root):
+    data = request.get_json(silent=True) or {}
+    paths = data.get("paths")
+    if not (isinstance(paths, list) and paths and all(isinstance(p, str) for p in paths)):
+        return jsonify(error="Es ist nichts ausgewählt."), 400
+    for p in paths:
+        resolve(root, p)  # Gesperrtes gleich hier ablehnen
+    try:
+        name = clean_name(str(data.get("name", "")))
+    except ValueError:
+        name = "Auswahl"
+    ticket = uuid.uuid4().hex
+    now = time.monotonic()
+    with _selections_lock:
+        for key, sel in list(_selections.items()):
+            if now - sel["at"] > _SELECTION_KEEP:
+                del _selections[key]
+        while len(_selections) >= _SELECTION_MAX:
+            del _selections[next(iter(_selections))]
+        _selections[ticket] = {"root": root, "paths": paths, "name": name, "user": g.user["username"], "at": now}
+    return jsonify(href=url_for("files.selection_download", root=root, ticket=ticket))
+
+
+@bp.get("/api/auswahl/<root>/<ticket>")
+@login_required
+def selection_download(root, ticket):
+    with _selections_lock:
+        sel = _selections.get(ticket)
+    if not sel or sel["root"] != root or sel["user"] != g.user["username"]:
+        abort(404, "Diese Auswahl ist abgelaufen. Bitte noch einmal auswählen und herunterladen.")
+    entry = transfers.begin("download", f"{sel['name']}.zip", 0, tid=request.args.get("t", ""))
+    try:
+        items, skipped = _selection_contents(root, sel["paths"], entry)
+    except Exception:
+        transfers.end(entry, remember=True)
+        raise
+    names = [p.rsplit("/", 1)[-1] for p in sel["paths"]]
+    shown = ", ".join(names[:3]) + (f" und {len(names) - 3} weitere" if len(names) > 3 else "")
+    events.log("download", f"{root_label(root)}: {shown} (Auswahl als ZIP)", entry["size"])
+    return _zip_response(sel["name"], items, skipped, entry)
 
 
 @bp.post("/api/suche/abbrechen")
@@ -493,12 +725,14 @@ def upload(root):
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
     filesize = current_app.jinja_env.filters["filesize"]
-    if root == "privat":
-        space = quota.info(g.user["username"])
-        if space["limit"] and quota.used(g.user["username"], fresh=True) + size > space["limit"]:
-            return jsonify(error=f"Dein Speicherplatz reicht dafür nicht – frei sind noch {filesize(space['free'])}. "
+    owner = quota_owner(root)
+    if owner:
+        space = quota.info(owner)
+        if space["limit"] and quota.used(owner, fresh=True) + size > space["limit"]:
+            who = "Dein Speicherplatz" if owner == g.user["username"] else f"Der Speicherplatz von {owner}"
+            return jsonify(error=f"{who} reicht dafür nicht – frei sind noch {filesize(space['free'])}. "
                                  "Lösche Dateien (auch im Papierkorb) oder bitte den Administrator um mehr Platz."), 413
-        quota.forget(g.user["username"])
+        quota.forget(owner)
     free = shutil.disk_usage(target).free
     if size > free:
         return jsonify(error=f"Auf der Festplatte ist nicht genug Platz – frei sind noch {filesize(free)}."), 507
@@ -569,9 +803,10 @@ def upload_done(root, tid):
         except (ValueError, OSError) as exc:
             return jsonify(error=str(exc)), 500
         transfers.end(entry)
-    if root == "privat":
-        quota.forget(g.user["username"])
-    events.log("upload", f"{ROOTS[root]}/{rel(entry['base'], dest)}", events.size_of(dest))
+    if quota_owner(root):
+        quota.forget(quota_owner(root))
+    forget_sizes()
+    events.log("upload", f"{root_label(root)}/{rel(entry['base'], dest)}", events.size_of(dest))
     return jsonify(saved=dest.name)
 
 
@@ -593,7 +828,7 @@ def mkdir(root):
     try:
         new_dir = target / new_name(root, base, target, request.form.get("name", ""))
         new_dir.mkdir()
-        events.log("mkdir", f"{ROOTS[root]}/{rel(base, new_dir)}")
+        events.log("mkdir", f"{root_label(root)}/{rel(base, new_dir)}")
     except FileExistsError:
         flash("Ein Element mit diesem Namen existiert bereits.", "error")
     except (ValueError, OSError) as exc:
@@ -613,7 +848,9 @@ def rename(root):
         if dest.exists():
             raise ValueError("Ein Element mit diesem Namen existiert bereits.")
         src.rename(dest)
-        events.log("rename", f"{ROOTS[root]}/{rel(base, src)} → {dest.name}", events.size_of(dest))
+        forget_sizes()
+        shares.moved(src, dest)
+        events.log("rename", f"{root_label(root)}/{rel(base, src)} → {dest.name}", events.size_of(dest))
     except (ValueError, OSError) as exc:
         flash(str(exc), "error")
     return back_to(root, sub)
@@ -629,8 +866,10 @@ def delete(root):
     from .trash import move_to_trash  # hier importiert, sonst Kreis-Import (trash nutzt files)
     try:
         size = events.size_of(target)
-        move_to_trash(root, base, target)
-        events.log("delete", f"{ROOTS[root]}/{rel(base, target)}", size)
+        move_to_trash(*trash_place(root, base), target)
+        forget_sizes()
+        shares.moved(target, None)
+        events.log("delete", f"{root_label(root)}/{rel(base, target)}", size)
         flash(f"„{target.name}“ in den Papierkorb verschoben.", "ok")
     except OSError as exc:
         flash(f"Löschen fehlgeschlagen: {exc}", "error")

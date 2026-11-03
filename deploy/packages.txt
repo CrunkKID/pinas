@@ -12,6 +12,8 @@ sdparm
 # Platten vom Windows-PC ohne Formatieren verwenden
 ntfs-3g
 exfatprogs
+# Festplatte prüfen: e2fsck (ext4); fsck.exfat steckt in exfatprogs, ntfsfix in ntfs-3g
+e2fsprogs
 # Verschlüsselte Weboberfläche
 nginx
 openssl

@@ -80,7 +80,7 @@ def _request_context() -> dict:
             return {}
         user = g.get("user")
         return {"seite": str(request.url_rule or "?"), "funktion": request.endpoint or "?", "methode": request.method,
-                "benutzer": user["username"] if user else "", "admin": bool(user and user["is_admin"])}
+                "benutzer": user["username"] if user else "", "ist_admin": bool(user and user["is_admin"])}
     except Exception:  # noqa: BLE001
         return {}
 

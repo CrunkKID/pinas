@@ -6,6 +6,25 @@ Schreibweise ab Version 1.3.1: unter „## x.y.z“ die Überschriften „### Ne
 darunter Punkte mit „- “. Nur Überschriften verwenden, zu denen es etwas gibt. Sicherheitspunkte ehrlich und verständlich schreiben,
 aber ohne Anleitung zum Ausnutzen. Ältere Abschnitte ohne Überschriften werden als einfache Liste angezeigt.
 
+## 1.5.0
+### Neu
+- Dateien bearbeiten wie im Explorer: Kopieren, Ausschneiden und Einfügen, auch mit Strg+C, Strg+X und Strg+V, dazu „Kopieren nach“ und „Verschieben nach“. Ziehen auf einen Ordner verschiebt, mit gedrückter Strg-Taste kopiert es. Mehrere Einträge lassen sich auf einmal löschen
+- Textdateien bis 2 MB lassen sich direkt im Browser bearbeiten
+- Ordner freigeben: Ordner aus „Privat“ lassen sich für andere Benutzer freigeben, pro Person nur zum Ansehen oder auch zum Ändern, in der Weboberfläche und im Netzlaufwerk
+- Mehrere ausgewählte Dateien und Ordner lassen sich zusammen als ZIP herunterladen
+- Ordner zeigen jetzt ihre Größe an
+- Neuer Knopf „Festplatte prüfen“ im Reiter „Laufwerk“ (nur für Administratoren): prüft exFAT, ext4 und NTFS im Hintergrund, zuerst ohne etwas zu ändern. Repariert wird nur nach deiner Bestätigung. Bei NTFS ist nur eine einfache Prüfung und Reparatur möglich
+
+### Verbessert
+- Herunterladen fragt zuerst nach dem Speicherort, wenn der Browser das kann
+- Dashboard-Kacheln sind höchstens 340 px breit und werden auf breiten Bildschirmen nicht mehr gestreckt
+- Beim Herunterfahren enden Netzlaufwerk und Weboberfläche jetzt vor dem Aushängen der Festplatte
+- Bei ausgeschalteter Festplatte zeigen Dateien und Papierkorb einen Hinweis mit Menü statt einer leeren Fehlerseite
+
+### Behoben
+- Nach „Festplatte ausschalten“, einem abgebrochenen Neustart oder dem Hinweis des Abschalt-Timers fiel die Weboberfläche bis zum nächsten Neustart aus
+- Fehlerbericht: Dateinamen mit Leerzeichen werden jetzt vollständig entfernt
+
 ## 1.4.0
 ### Neu
 - Dateisuche im Reiter „Dateien“: Nach Datei- und Ordnernamen suchen, im ganzen Laufwerk oder nur im aktuellen Ordner. Papierkorb und private Dateien anderer bleiben draußen

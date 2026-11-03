@@ -21,7 +21,7 @@
   <h2>Privates Laufwerk</h2>
   {% if has_private %}
   <p><span class="dot ok"></span><b>Eingerichtet.</b> Dein Laufwerk „Privat“ siehst nur du – weder andere Benutzer noch Administratoren
-    können es über die Weboberfläche oder das Netzlaufwerk öffnen.</p>
+    können es über die Weboberfläche oder das Netzlaufwerk öffnen. Ausnahme sind Ordner, die du selbst freigibst.</p>
   {% if space.limit %}
   <div class="bar{{ ' full' if space.pct >= 90 }}"><span style="width: {{ space.pct|round(1) }}%"></span></div>
   <p>{{ space.used|filesize }} von <b>{{ space.limit|filesize }}</b> belegt – noch {{ space.free|filesize }} frei.
@@ -46,6 +46,37 @@
   </form>
   {% endif %}
 </div>
+
+{% if has_private %}
+<div class="card" id="my-shares">
+  <h2>🤝 Meine Freigaben</h2>
+  {% if my_shares %}
+  <ul class="share-list">
+    {% for s in my_shares %}
+    <li>
+      <div>
+        <a href="{{ url_for('files.browse', root='privat', sub=s.path) }}"><b>{{ s.path }}</b></a>
+        <small>
+          {% for m in s.members %}{{ m.username }} ({{ 'ändern' if m.can_write else 'ansehen' }}){{ ', ' if not loop.last }}{% endfor %}
+          {% if not s.active %}· ruht, der Ordner fehlt{% endif %}
+        </small>
+        {% if s.samba and s.active %}<small>Im Netzlaufwerk: <code>\\{{ host }}\{{ s.samba }}</code></small>
+        {% elif not s.samba %}<small>Nur in der Weboberfläche: Der Ordnername enthält % oder \.</small>{% endif %}
+      </div>
+      <form method="post" action="{{ url_for('shares.end', share_id=s.id) }}"
+            data-confirm="Die anderen Benutzer sehen den Ordner dann nicht mehr. Deine Dateien bleiben in „Privat“."
+            data-confirm-title="Freigabe beenden?" data-confirm-ok="Beenden">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn-sm">Beenden</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Du hast noch nichts freigegeben. Klicke in „Privat“ mit der rechten Maustaste auf einen Ordner und wähle „Freigeben …“.</p>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="card app-card" id="app-card">
   <h2>📱 PiNAS als App</h2>

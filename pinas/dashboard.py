@@ -14,6 +14,7 @@ from flask import Blueprint, Response, current_app, flash, g, jsonify, redirect,
 
 from . import crashlog, events, powertimer, transfers
 from .auth import admin_required, helper, login_required
+from .config import disk_is_off
 from .db import get_db
 from .helper import HelperError
 
@@ -178,7 +179,7 @@ def pi_power() -> float | None:
 
 def disk_power(io: dict | None) -> dict | None:
     """Geschätzte Leistung der USB-Festplatte aus Plattentyp und Zustand (aktiv/bereit/Ruhezustand)."""
-    if (RUN_DIR / "disk-off").exists():
+    if disk_is_off(current_app.config):
         return {"watts": 0.0, "state": "ausgeschaltet", "kind": ""}
     if not io or not io["device"].startswith("sd"):
         return None  # keine USB-Platte (Daten auf der SD-Karte)
@@ -361,14 +362,14 @@ RUN_DIR = Path("/run/pinas")  # Zustand der Ein/Aus-Knöpfe (geschrieben von pin
 
 def power_state() -> dict:
     """Ist die Festplatte ausgeschaltet, und ist ein Herunterfahren/Neustart geplant?"""
-    state = {"disk_off": (RUN_DIR / "disk-off").exists(), "pending": None}
+    state = {"disk_off": disk_is_off(current_app.config), "pending": None}
     try:
         p = json.loads((RUN_DIR / "power.json").read_text())
         if p.get("at", 0) > time.time() - 10:
             p["at_text"] = datetime.fromtimestamp(p["at"]).strftime("%H:%M:%S Uhr")
             state["pending"] = p
-    except (OSError, ValueError):
-        pass
+    except (OSError, ValueError, TypeError, OverflowError, AttributeError):
+        pass  # beschädigte Datei: dann gilt nichts als geplant
     return state
 
 

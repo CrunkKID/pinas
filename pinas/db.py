@@ -23,6 +23,20 @@ CREATE TABLE IF NOT EXISTS revoked_sessions (
     sid        TEXT PRIMARY KEY,
     expires    REAL NOT NULL
 );
+-- Ordnerfreigaben: Ordner path (relativ zu „Privat“ von owner) und wer ihn sehen oder ändern darf, siehe shares.py
+CREATE TABLE IF NOT EXISTS shares (
+    id         INTEGER PRIMARY KEY,
+    owner      TEXT NOT NULL,
+    path       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (owner, path)
+);
+CREATE TABLE IF NOT EXISTS share_members (
+    share_id   INTEGER NOT NULL,
+    username   TEXT NOT NULL,
+    can_write  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (share_id, username)
+);
 """
 
 

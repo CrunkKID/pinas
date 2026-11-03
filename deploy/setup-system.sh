@@ -158,6 +158,19 @@ install -m 0644 "$SRC/deploy/pinas-diskpower.service" /etc/systemd/system/pinas-
 install -m 0644 "$SRC/deploy/pinas-diskpower.timer" /etc/systemd/system/pinas-diskpower.timer
 systemctl enable pinas-diskpower.timer
 
+echo "==> Festplatte prüfen"
+install -m 0755 -o root -g root "$SRC/deploy/pinas-diskcheck" /usr/local/sbin/pinas-diskcheck
+install -m 0644 "$SRC/deploy/pinas-diskcheck.service" /etc/systemd/system/pinas-diskcheck.service
+
+echo "==> Sauberes Abmelden der Festplatte beim Herunterfahren"
+# Nur die Reihenfolge, keine Abhängigkeit: Beim Herunterfahren enden Netzlaufwerk und Weboberfläche vor dem Aushängen,
+# sonst scheitert es an noch offenen Dateien. Fehlt die Platte (nofail), starten beide trotzdem
+MOUNT_UNIT="$(systemd-escape -p --suffix=mount "$DATA")"
+for unit in smbd pinas; do
+  mkdir -p "/etc/systemd/system/$unit.service.d"
+  printf '[Unit]\nAfter=%s\n' "$MOUNT_UNIT" > "/etc/systemd/system/$unit.service.d/pinas-mount.conf"
+done
+
 echo "==> Fehlerprotokoll und Notfallseite"
 # Das Systemprotokoll bleibt ab dem nächsten Neustart erhalten (nach einem Update startet PiNAS ohnehin neu)
 install -D -m 0644 "$SRC/deploy/journald-pinas.conf" /etc/systemd/journald.conf.d/90-pinas.conf

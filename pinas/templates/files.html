@@ -15,7 +15,7 @@
   </div>
   <div class="usage" id="usage" title="{{ usage.used|filesize }} von {{ usage.total|filesize }} belegt">
     <div class="bar"><span style="width: {{ [(usage.used / usage.total * 100), 100]|min|round(1) if usage.total else 0 }}%"></span></div>
-    <small>{% if quota_free is not none %}Dein Speicher: {{ usage.free|filesize }} von {{ usage.total|filesize }} frei{% else %}{{ usage.free|filesize }} frei{% endif %}</small>
+    <small>{% if quota_free is not none %}{{ 'Dein Speicher' if root == 'privat' else 'Speicher des Besitzers' }}: {{ usage.free|filesize }} von {{ usage.total|filesize }} frei{% else %}{{ usage.free|filesize }} frei{% endif %}</small>
   </div>
 </div>
 
@@ -43,16 +43,19 @@
 </div>
 
 <div class="toolbar">
-  <label class="button primary">
+  {# Bei „nur ansehen“ bleibt beides im Dokument (files.js braucht es), ist aber nicht zu sehen. Der Server lehnt Änderungen ohnehin ab #}
+  <label class="button primary"{% if not writable %} style="display:none"{% endif %}>
     Hochladen<input type="file" id="file-input" multiple hidden>
   </label>
-  <form method="post" action="{{ url_for('files.mkdir', root=root) }}" class="inline" id="mkdir-form">
+  <form method="post" action="{{ url_for('files.mkdir', root=root) }}" class="inline" id="mkdir-form"{% if not writable %} style="display:none"{% endif %}>
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="dir" value="{{ sub }}">
     <input type="hidden" name="name">
     <button type="button" id="mkdir-btn">Neuer Ordner</button>
   </form>
-  <a class="button" href="{{ url_for('trash.browse', root=root) }}">🗑 Papierkorb</a>
+  <button type="button" id="paste-btn" hidden>📋 Einfügen</button>
+  {% if root in ('privat', 'gemeinsam') %}<a class="button" href="{{ url_for('trash.browse', root=root) }}">🗑 Papierkorb</a>
+  {% elif not writable %}<span class="muted">Nur zum Ansehen freigegeben</span>{% endif %}
   <details class="menu">
     <summary class="button">⇅ Sortieren</summary>
     <div class="menu-pop" role="menu">
@@ -96,7 +99,7 @@
   </symbol>
 </svg>
 
-<div id="dropzone" class="dropzone" data-view="details" data-upload="{{ url_for('files.upload', root=root) }}" data-dir="{{ sub }}"{% if quota_free is not none %} data-quota-free="{{ quota_free }}"{% endif %}>
+<div id="dropzone" class="dropzone" data-view="details" data-upload="{{ url_for('files.upload', root=root) }}" data-selection="{{ url_for('files.selection', root=root) }}" data-dir="{{ sub }}" data-root="{{ root }}" data-writable="{{ 1 if writable else 0 }}"{% if quota_free is not none %} data-quota-free="{{ quota_free }}"{% endif %}>
   <div id="listing">
   {% if search %}
   {% set place = roots[root] ~ (' › ' ~ sub|replace('/', ' › ') if search.scope else '') %}
@@ -115,6 +118,7 @@
   {% if entries %}
   <div class="fv">
     <div class="fv-head">
+      <label class="fv-check" title="Alle auswählen"><input type="checkbox" data-select-all aria-label="Alle auswählen"></label>
       <button type="button" data-sort="name">Name</button>
       <button type="button" data-sort="type">Typ</button>
       <button type="button" data-sort="size" class="num">Größe</button>
@@ -123,8 +127,9 @@
     </div>
     <div class="fv-list">
     {% for e in entries %}
-      <div class="fv-item" data-name="{{ e.name }}" data-kind="{{ e.kind }}" data-type="{{ e.type }}"
-           data-size="{{ e.size if e.size is not none else -1 }}" data-ts="{{ e.ts }}" data-dir="{{ 1 if e.is_dir else 0 }}">
+      <div class="fv-item" data-name="{{ e.name }}" data-kind="{{ e.kind }}" data-type="{{ e.type }}" data-path="{{ e.path }}"
+           data-size="{{ e.size if e.size is not none else -1 }}" data-ts="{{ e.ts }}" data-dir="{{ 1 if e.is_dir else 0 }}"{% if e.is_dir %} data-size-url="{{ url_for('files.folder_size', root=root, sub=e.path) }}"{% endif %}{% if e.editable %} data-edit="{{ url_for('fileops.edit', root=root, sub=e.path) }}"{% endif %}>
+        <label class="fv-check" title="Auswählen"><input type="checkbox" data-select aria-label="„{{ e.name }}“ auswählen"></label>
         <a class="fv-main" href="{{ url_for('files.browse', root=root, sub=e.path) }}" title="{{ 'Ordner „' ~ e.name ~ '“ öffnen' if e.is_dir else e.name }}"{% if not e.is_dir %} target="_blank"{% endif %}>
           <span class="fv-icon">
             <svg><use href="#ic-{{ 'dir' if e.is_dir else 'file' }}"/></svg>
@@ -132,17 +137,19 @@
             {% if e.thumb %}<img class="fv-thumb" alt="" loading="lazy" decoding="async" data-src="{{ url_for('files.browse', root=root, sub=e.path) }}">{% endif %}
           </span>
           <span class="fv-text">
-            <span class="fv-name">{{ e.base }}{% if e.suffix %}<span class="fv-ext">{{ e.suffix }}</span>{% endif %}</span>
-            <span class="fv-meta"><span>{{ e.type }}</span>{% if not e.is_dir %}<span>{{ e.size|filesize }}</span>{% endif %}</span>
+            <span class="fv-name">{{ e.base }}{% if e.suffix %}<span class="fv-ext">{{ e.suffix }}</span>{% endif %}{% if e.path in shared_paths %} <span title="Für andere freigegeben">🤝</span>{% endif %}</span>
+            <span class="fv-meta"><span>{{ e.type }}</span>{% if e.is_dir %}<span class="fv-dirsize" title="Wird berechnet …">…</span>{% else %}<span>{{ e.size|filesize }}</span>{% endif %}</span>
           </span>
         </a>
         <span class="fv-type">{{ e.type }}</span>
-        <span class="fv-size">{{ e.size|filesize if not e.is_dir else '' }}</span>
+        {% if e.is_dir %}<span class="fv-size fv-dirsize" title="Wird berechnet …">…</span>{% else %}<span class="fv-size">{{ e.size|filesize }}</span>{% endif %}
         <span class="fv-date">{{ e.mtime }}</span>
         <span class="fv-actions">
           <a class="btn-sm" data-download href="{{ url_for('files.browse', root=root, sub=e.path, dl=1) }}" title="{{ 'Ordner als ZIP herunterladen' if e.is_dir else 'Herunterladen' }}">⬇</a>
+          {% if writable %}
           <button class="btn-sm" data-rename="{{ e.path }}" data-name="{{ e.name }}" title="Umbenennen">✎</button>
           <button class="btn-sm danger" data-delete="{{ e.path }}" data-name="{{ e.name }}" title="Löschen">🗑</button>
+          {% endif %}
         </span>
         {% if search %}
         {% set folder = roots[root] ~ (' › ' ~ e.where|replace('/', ' › ') if e.where else '') %}
@@ -158,6 +165,20 @@
   <p class="empty">Dieser Ordner ist leer. Dateien hierher ziehen oder „Hochladen“ wählen.</p>
   {% endif %}
   </div>
+</div>
+
+{# Außerhalb von #listing: Beim Neuladen der Liste bleibt die Leiste stehen, die Auswahl wird wieder angewendet #}
+<div class="fpick" id="pick-bar" role="group" aria-label="Auswahl" hidden>
+  <span id="pick-count" role="status"></span>
+  <button type="button" class="primary" id="pick-download">⬇ Herunterladen</button>
+  <button type="button" data-pick-edit="copy">⧉ Kopieren</button>
+  <button type="button" data-pick-edit="copy-to">Kopieren nach …</button>
+  {% if writable %}
+  <button type="button" data-pick-edit="cut">✂ Ausschneiden</button>
+  <button type="button" data-pick-edit="move-to">Verschieben nach …</button>
+  <button type="button" class="danger" data-pick-edit="delete">🗑 Löschen</button>
+  {% endif %}
+  <button type="button" id="pick-none">✕ Auswahl aufheben</button>
 </div>
 
 <form method="post" id="action-form" hidden>
@@ -176,4 +197,5 @@
 <script src="{{ url_for('static', filename='netspeed.js') }}"></script>
 <script src="{{ url_for('static', filename='fileview.js') }}"></script>
 <script src="{{ url_for('static', filename='files.js') }}"></script>
+<script src="{{ url_for('static', filename='fileedit.js') }}"></script>
 {% endblock %}

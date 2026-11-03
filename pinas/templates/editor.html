@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}{% endblock %}
+{% block content %}
+<nav class="crumbs">
+  <a href="{{ url_for('files.browse', root=root, sub=folder) }}">← Zurück zu {{ place }}{% if folder %}/{{ folder }}{% endif %}</a>
+</nav>
+<div class="editor" id="editor" data-url="{{ url_for('fileops.save', root=root, sub=sub) }}" data-version="{{ version }}">
+  <div class="toolbar">
+    <b>{{ name }}</b>
+    {% if writable and not problem %}<button class="primary" id="editor-save" disabled>Speichern</button>{% endif %}
+    <span id="editor-state" class="muted" role="status">{% if not writable %}Nur zum Ansehen freigegeben{% endif %}</span>
+  </div>
+  {% if problem %}
+  <p class="empty">{{ problem }} Du kannst die Datei stattdessen herunterladen.</p>
+  {% else %}
+  <textarea id="editor-text" spellcheck="false" aria-label="Inhalt von {{ name }}"{% if not writable %} readonly{% endif %}>{{ text }}</textarea>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='editor.js') }}"></script>
+{% endblock %}

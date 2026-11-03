@@ -5,6 +5,7 @@ Die Einträge liegen in einer eigenen kleinen Datenbank (events.db). Sie ist in 
 höchstens MAX_ROWS Einträge, nichts älter als MAX_DAYS Tage – Älteres wird automatisch gelöscht.
 """
 import json
+import logging
 import os
 import re
 import socket
@@ -51,6 +52,10 @@ ACTIONS = {
     "restore":     ("Wiederhergestellt", "↩", "off"),
     "purge":       ("Endgültig gelöscht", "✖", "bad"),
     "empty":       ("Papierkorb geleert", "✖", "bad"),
+    "copy":        ("Kopiert", "⧉", "ok"),
+    "move":        ("Verschoben", "➜", "off"),
+    "share":       ("Ordner freigegeben", "🤝", "warn"),
+    "unshare":     ("Freigabe beendet", "🤝", "off"),
     "write":       ("Gespeichert / geändert", "💾", "ok"),
     "read":        ("Gelesen", "👁", "off"),
     "setting":     ("Einstellung geändert", "⚙", "warn"),
@@ -58,6 +63,9 @@ ACTIONS = {
     "timer_on":    ("Abschalt-Timer: wieder eingeschaltet", "⏻", "ok"),
     "timer_wait":  ("Abschalt-Timer: verschoben", "⏳", "warn"),
     "timer_cancel": ("Abschalt-Timer: abgebrochen", "⏻", "off"),
+    "disk_ok":     ("Festplatte geprüft", "🔍", "ok"),
+    "disk_warn":   ("Festplatte geprüft: bitte ansehen", "🔍", "warn"),
+    "disk_bad":    ("Festplatten-Prüfung: Problem", "🔍", "bad"),
 }
 
 _lock = threading.Lock()
@@ -209,6 +217,23 @@ def log(action: str, detail: str = "", size: int | None = None, username: str | 
         current_app.logger.exception("Ereignis konnte nicht protokolliert werden")
 
 
+def later(action: str, detail: str = ""):
+    """Für Arbeiten im Hintergrund: Merkt sich Benutzer und Gerät jetzt, geschrieben wird beim Aufruf mit der Größe."""
+    cfg = current_app.config
+    username = g.user["username"] if g.get("user") else ""
+    ip = request.remote_addr or ""
+    device = device_name(request.headers.get("User-Agent", ""))
+
+    def write(size: int | None = None) -> None:
+        try:
+            if enabled(cfg):
+                _insert(cfg, [(time.time(), username, action, detail, size, ip, _host_cache.get(ip), device, "web")])
+        except Exception:  # noqa: BLE001 – das Protokoll darf nie eine Aktion des Benutzers verhindern
+            logging.getLogger(__name__).exception("Ereignis konnte nicht protokolliert werden")
+
+    return write
+
+
 def log_system(cfg, action: str, detail: str = "") -> None:
     """Ein Ereignis, das PiNAS selbst auslöst (kein Benutzer, kein Gerät)."""
     _insert(cfg, [(time.time(), "System", action, detail, None, "", "", "PiNAS", "system")])
@@ -290,7 +315,7 @@ def _parse_samba(cfg, msg: str, ts: float) -> tuple | None:
     if action != "connect":
         if path in ("", ".") or _NOISE.search(path) or ".papierkorb" in path.split("/")[0]:
             return None
-        if op == "renameat" and len(args) >= 2 and args[1].startswith(".papierkorb"):
+        if op == "renameat" and len(args) >= 2 and (args[1].startswith(".papierkorb") or "/.papierkorb/" in args[1]):
             return None
     size = None
     if base and action in ("read", "write"):
@@ -388,7 +413,7 @@ def recent(cfg, limit: int = 30, offset: int = 0, username: str = "", kind: str 
         where.append("action IN ('login', 'login_fail', 'login_block', 'logout', 'connect')")
     elif kind == "files":
         where.append("action NOT IN ('login', 'login_fail', 'login_block', 'logout', 'connect', 'setting') "
-                     "AND action NOT LIKE 'timer%'")
+                     "AND action NOT LIKE 'timer%' AND action NOT LIKE 'disk\\_%' ESCAPE '\\'")
     sql = "SELECT * FROM events" + (" WHERE " + " AND ".join(where) if where else "")
     sql += " ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?"
     try:

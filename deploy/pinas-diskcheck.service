@@ -1,0 +1,12 @@
+[Unit]
+Description=PiNAS Festplatte pruefen
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/pinas-diskcheck --run
+# Raeumt auf, falls --run hart beendet wurde: Platte einhaengen, Netzlaufwerk starten, Merker entfernen
+ExecStopPost=/usr/local/sbin/pinas-diskcheck --finish
+# Beim Herunterfahren bekommt nur das Skript das Signal, eine laufende Reparatur laeuft zu Ende
+KillMode=process
+TimeoutStopSec=6h
+OOMScoreAdjust=-500

@@ -51,6 +51,10 @@ class SystemHelper:
         """Freigabe „Privat“ im Netzlaufwerk für diesen Benutzer ein- oder ausschalten."""
         self._run("private-access", username, "on" if on else "off")
 
+    def set_shares(self, lines: list[str]) -> None:
+        """Ordnerfreigaben fürs Netzlaufwerk; je Zeile mit Tabulatoren: Name, Besitzer, Pfad, Leser, Schreiber."""
+        self._run("set-shares", stdin="".join(line + "\n" for line in lines), timeout=60)
+
     def use_disk(self, device: str, mode: str, layout: str = "folder") -> None:
         """mode "format": Laufwerk löschen und neu formatieren, "keep": ext4-/NTFS-/exFAT-Partition übernehmen.
         layout "folder": eigene Ordner für „Gemeinsam“, "root": „Gemeinsam“ zeigt die ganze Platte."""
@@ -65,6 +69,10 @@ class SystemHelper:
 
     def disk_sleep(self) -> None:
         self._run("disk-sleep", timeout=60)
+
+    def disk_check(self, action: str) -> None:
+        """Festplatten-Prüfung im eigenen Dienst: check, repair oder cancel (nur die reine Prüfung)."""
+        self._run("disk-check", action, timeout=90)
 
     def power(self, action: str) -> None:
         """shutdown, reboot, safe-shutdown, disk-off, disk-on oder cancel."""

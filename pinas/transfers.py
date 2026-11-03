@@ -59,7 +59,7 @@ def status(tid: str) -> dict:
         finished = tid in _done
     if not e or e["user"] != g.user["username"]:
         return {"known": False}
-    return {"known": True, "finished": finished, "done": e["done"], "size": e["size"]}
+    return {"known": True, "finished": finished, "done": e["done"], "size": e["size"], "result": e.get("result")}
 
 
 def touch(entry: dict) -> None:
@@ -91,6 +91,6 @@ def describe(entries: list[dict]) -> str:
     if not entries:
         return ""
     e = entries[0]
-    what = "hochgeladen" if e["kind"] == "upload" else "heruntergeladen"
+    what = {"upload": "hochgeladen", "copy": "kopiert", "move": "verschoben"}.get(e["kind"], "heruntergeladen")
     more = f" und {len(entries) - 1} weitere Übertragung(en)" if len(entries) > 1 else ""
     return f"Gerade wird „{e['name']}“ {what} (von {e['user']}){more}. Das geht erst, wenn alles fertig ist."

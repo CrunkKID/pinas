@@ -51,12 +51,14 @@ def create_app() -> Flask:
     app.extensions["pinas_helper"] = SystemHelper(app.config["HELPER"])
     app.extensions["pinas_history"] = History(app.config["DB_PATH"].parent / "history.json")
 
-    from . import admin, auth, dashboard, disk, files, pwa, tls, trash, updates
+    from . import admin, auth, dashboard, disk, fileops, files, pwa, shares, tls, trash, updates
     app.register_blueprint(auth.bp)
     app.register_blueprint(pwa.bp)
     app.register_blueprint(tls.bp)
     app.register_blueprint(updates.bp)
     app.register_blueprint(files.bp)
+    app.register_blueprint(fileops.bp)
+    app.register_blueprint(shares.bp)
     app.register_blueprint(trash.bp)
     app.register_blueprint(dashboard.bp)
     app.register_blueprint(admin.bp)
@@ -66,6 +68,16 @@ def create_app() -> Flask:
     def index():
         # Ohne eingerichtetes „Privat“ leitet files.browse weiter nach „Gemeinsam“
         return redirect(url_for("files.browse", root="privat"))
+
+    @app.errorhandler(503)
+    def unavailable(exc):
+        # Festplatte aus: Seiten behalten das Menü, damit man zum Dashboard kommt. Skripte bekommen weiter die 503
+        if request.method != "GET" or request.path.startswith("/api/") or request.accept_mimetypes.best == "application/json":
+            return exc
+        try:
+            return render_template("unavailable.html", text=exc.description), 503
+        except Exception:  # noqa: BLE001
+            return exc
 
     @app.errorhandler(500)
     def server_error(exc):

@@ -1,6 +1,6 @@
 from flask import Blueprint, current_app, flash, g, redirect, render_template, request, url_for
 
-from . import private, quota, users
+from . import private, quota, shares, users
 from .auth import admin_required, helper, keep_login
 from .config import storage
 from .db import get_db
@@ -79,6 +79,8 @@ def delete(username):
         try:
             users.delete_user(get_db(), helper(), username)
             quota.set_quota(username, None)
+            shares.forget_user(get_db(), username)
+            shares.sync()
             flash(f"Benutzer „{username}“ gelöscht. Der private Ordner wurde behalten.", "ok")
         except users.UserError as exc:
             flash(str(exc), "error")
