@@ -112,6 +112,10 @@ grep -q '^include = /etc/samba/pinas.conf' /etc/samba/smb.conf || \
   printf '\n# PiNAS-Freigaben\ninclude = /etc/samba/pinas.conf\n' >> /etc/samba/smb.conf
 # Erzeugt /etc/samba/pinas.conf passend zur Ordner-Aufteilung und prüft sie mit testparm
 /usr/local/sbin/pinas-helper samba-config
+# Passwort-Raten am Netzlaufwerk bremsen: Nach 10 Fehlversuchen ist das Konto dort 15 Minuten gesperrt
+pdbedit -P "bad lockout attempt" -C 10 >/dev/null 2>&1 || true
+pdbedit -P "lockout duration" -C 15 >/dev/null 2>&1 || true
+pdbedit -P "reset count minutes" -C 15 >/dev/null 2>&1 || true
 
 echo "==> Hinweis auf dem Pi-Bildschirm"
 # Zeigt über der Anmeldezeile die echte IP-Adresse an, aktualisiert bei jeder Netzwerkänderung

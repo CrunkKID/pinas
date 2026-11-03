@@ -10,7 +10,7 @@
 <div class="files-head">
   <div class="tabs">
     {% for key, label in roots.items() %}
-      <a href="{{ url_for('files.browse', root=key) }}" class="{{ 'active' if key == root }}">{{ label }}</a>
+      <a href="{{ url_for('files.browse', root=key, q=search.q if search else none) }}" class="{{ 'active' if key == root }}">{{ label }}</a>
     {% endfor %}
   </div>
   <div class="usage" id="usage" title="{{ usage.used|filesize }} von {{ usage.total|filesize }} belegt">
@@ -23,6 +23,24 @@
   <a href="{{ url_for('files.browse', root=root) }}">{{ roots[root] }}</a>
   {% for name, path in crumbs %}<span>/</span><a href="{{ url_for('files.browse', root=root, sub=path) }}">{{ name }}</a>{% endfor %}
 </nav>
+
+{# Sucht erst auf Enter bzw. „Suchen“, nicht bei jedem Tastendruck: Jede Suche liest die Ordner auf der Festplatte #}
+<form class="fsearch" id="search-form" role="search" method="get" action="{{ url_for('files.browse', root=root, sub=sub) }}">
+  <input type="search" name="q" value="{{ search.q if search }}" maxlength="100" enterkeyhint="search"
+         placeholder="Dateien und Ordner in „{{ roots[root] }}“ suchen …" aria-label="Dateien und Ordner suchen">
+  {% if sub %}
+  <select name="wo" aria-label="Wo suchen?">
+    <option value="">Ganz {{ roots[root] }}</option>
+    <option value="ordner"{% if search and search.scope %} selected{% endif %}>Nur in „{{ crumbs[-1][0] }}“</option>
+  </select>
+  {% endif %}
+  <button>🔍 Suchen</button>
+</form>
+<div class="fsearch-note" id="search-busy" role="status" hidden>
+  <span class="fsearch-spin" aria-hidden="true"></span>
+  <span>Suche läuft … Schläft die Festplatte, wird sie dafür geweckt, das dauert ein paar Sekunden länger.</span>
+  <button type="button" class="btn-sm" id="search-cancel">Abbrechen</button>
+</div>
 
 <div class="toolbar">
   <label class="button primary">
@@ -80,6 +98,20 @@
 
 <div id="dropzone" class="dropzone" data-view="details" data-upload="{{ url_for('files.upload', root=root) }}" data-dir="{{ sub }}"{% if quota_free is not none %} data-quota-free="{{ quota_free }}"{% endif %}>
   <div id="listing">
+  {% if search %}
+  {% set place = roots[root] ~ (' › ' ~ sub|replace('/', ' › ') if search.scope else '') %}
+  <div class="fsearch-note">
+    <span>
+      {% if search.too_short %}Bitte mindestens {{ search.min_chars }} Zeichen eingeben.
+      {% else %}<b>{{ entries|length }} Treffer</b> für „{{ search.q }}“ in {{ place }} samt Unterordnern.
+        {% if search.stopped == 'limit' %}Mehr als {{ search.max_hits }} gibt es nicht auf einmal – bitte genauer suchen.
+        {% elif search.stopped == 'time' %}Nach {{ search.max_seconds }} Sekunden beendet, es kann noch mehr geben – bitte in einem Unterordner suchen.
+        {% elif search.stopped == 'cancel' %}Abgebrochen, es kann noch mehr geben.{% endif %}
+      {% endif %}
+    </span>
+    <a class="button btn-sm" href="{{ url_for('files.browse', root=root, sub=sub) }}">✕ Suche beenden</a>
+  </div>
+  {% endif %}
   {% if entries %}
   <div class="fv">
     <div class="fv-head">
@@ -112,10 +144,16 @@
           <button class="btn-sm" data-rename="{{ e.path }}" data-name="{{ e.name }}" title="Umbenennen">✎</button>
           <button class="btn-sm danger" data-delete="{{ e.path }}" data-name="{{ e.name }}" title="Löschen">🗑</button>
         </span>
+        {% if search %}
+        {% set folder = roots[root] ~ (' › ' ~ e.where|replace('/', ' › ') if e.where else '') %}
+        <a class="fv-where" href="{{ url_for('files.browse', root=root, sub=e.where) }}" data-place="{{ folder }}" title="Ordner öffnen: {{ folder }}">in {{ folder }}</a>
+        {% endif %}
       </div>
     {% endfor %}
     </div>
   </div>
+  {% elif search %}
+  {% if not search.too_short %}<p class="empty">Nichts gefunden. Vielleicht liegt es im anderen Laufwerk oder heißt etwas anders – ein Teil des Namens genügt.</p>{% endif %}
   {% else %}
   <p class="empty">Dieser Ordner ist leer. Dateien hierher ziehen oder „Hochladen“ wählen.</p>
   {% endif %}
@@ -127,6 +165,10 @@
   <input type="hidden" name="dir" value="{{ sub }}">
   <input type="hidden" name="path">
   <input type="hidden" name="name">
+  {% if search %}
+  <input type="hidden" name="q" value="{{ search.q }}">
+  <input type="hidden" name="wo" value="{{ search.scope }}">
+  {% endif %}
 </form>
 <span id="urls" hidden data-rename-url="{{ url_for('files.rename', root=root) }}" data-delete-url="{{ url_for('files.delete', root=root) }}"></span>
 {% endblock %}

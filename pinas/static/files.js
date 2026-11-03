@@ -23,6 +23,37 @@
   // Aktueller Ordner für die Anzeige, z. B. „Gemeinsam › Fotos › 2024“
   const place = () => [...document.querySelectorAll(".crumbs a")].map((a) => a.textContent.trim()).join(" › ");
 
+  // Suche: Das Formular lädt die Seite ganz normal neu (geht so auch im Rahmen und mit „Zurück“).
+  // Hier nur der Hinweis, solange der Pi sucht. „Abbrechen“ zeigt danach, was bis dahin gefunden wurde.
+  const searchForm = document.getElementById("search-form");
+  const searchBusy = document.getElementById("search-busy");
+  const cancelSearch = document.getElementById("search-cancel");
+  let searching = false;
+  searchForm.addEventListener("submit", (e) => {
+    if (!searchForm.elements.q.value.trim()) {
+      e.preventDefault();
+      location.href = searchForm.action;  // leeres Feld: zurück zum Ordner
+      return;
+    }
+    searching = true;
+    searchBusy.hidden = false;
+    cancelSearch.disabled = false;
+  });
+  cancelSearch.addEventListener("click", () => {
+    cancelSearch.disabled = true;
+    fetch("/api/suche/abbrechen", { method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": window.CSRF } }).catch(() => {});
+  });
+  // Woandershin geklickt, während sie noch läuft: Niemand wartet mehr darauf, also die Platte nicht weiter beschäftigen
+  addEventListener("pagehide", () => {
+    if (!searching) return;
+    const form = new FormData();
+    form.append("csrf_token", window.CSRF);
+    navigator.sendBeacon("/api/suche/abbrechen", form);
+  });
+  addEventListener("pageshow", (e) => {
+    if (e.persisted) { searching = false; searchBusy.hidden = true; }
+  });
+
   function upload(fileList) {
     const files = [...fileList];
     input.value = "";  // dieselbe Datei kann erneut gewählt werden
@@ -61,7 +92,8 @@
       e.preventDefault();
       const item = dl.closest(".fv-item");
       const isDir = item.dataset.dir === "1";
-      transfer.download({ href: dl.href, name: item.dataset.name, dest: place(), size: isDir ? 0 : +item.dataset.size, isDir });
+      const dest = item.querySelector(".fv-where")?.dataset.place || place();  // Suchtreffer liegen anderswo
+      transfer.download({ href: dl.href, name: item.dataset.name, dest, size: isDir ? 0 : +item.dataset.size, isDir });
       return;
     }
     const btn = e.target.closest("[data-rename], [data-delete]");

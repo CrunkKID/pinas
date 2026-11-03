@@ -353,10 +353,6 @@ select { font: inherit; padding: .55rem .8rem; border: 1px solid var(--border); 
 .swatch.free { background: var(--border); }
 .disk-warn { color: var(--bad) !important; font-weight: 600; }
 @media (min-width: 760px) { .disk-card { grid-column: span 2; } }
-.io { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
-.io > div { display: grid; }
-.io strong { font-size: 1.5rem; }
-.io-label { font-size: .8rem; color: var(--muted); }
 .services { list-style: none; margin: 0; padding: 0; display: grid; }
 .services li { display: flex; justify-content: space-between; align-items: center; gap: 1rem;
   padding: .75rem 0; border-bottom: 1px solid var(--border); }
@@ -449,14 +445,6 @@ select { font: inherit; padding: .55rem .8rem; border: 1px solid var(--border); 
 .reboot-box p { margin: 0 0 .5rem; }
 .dash-bar + .reboot-box { margin-bottom: 1rem; }
 @media (max-width: 640px) { .reboot-box { flex-direction: column; text-align: center; } }
-
-/* Energieverbrauch */
-.energy-list { margin: .2rem 0 0; display: grid; gap: .3rem; font-size: .92rem; }
-.energy-list div { display: flex; justify-content: space-between; gap: .8rem; }
-.energy-list dt { margin: 0; }
-.energy-list dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.energy-list .energy-sum { border-top: 1px solid var(--border); padding-top: .3rem; }
-.energy-card [title] { cursor: help; }
 
 /* Speicherplatz pro Benutzer */
 .quota-cell { min-width: 220px; }

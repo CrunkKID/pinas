@@ -1,6 +1,32 @@
 # Neuigkeiten in PiNAS
 
-Neueste Version oben. Das Update-Center zeigt die Abschnitte an, die neuer sind als die installierte Version.
+Neueste Version oben. Das Update-Center zeigt die installierte Version und vor der Installation alle neueren Abschnitte.
+
+Schreibweise ab Version 1.3.1: unter „## x.y.z“ die Überschriften „### Neu“, „### Verbessert“, „### Behoben“ und „### Sicherheit“,
+darunter Punkte mit „- “. Nur Überschriften verwenden, zu denen es etwas gibt. Sicherheitspunkte ehrlich und verständlich schreiben,
+aber ohne Anleitung zum Ausnutzen. Ältere Abschnitte ohne Überschriften werden als einfache Liste angezeigt.
+
+## 1.4.0
+### Neu
+- Dateisuche im Reiter „Dateien“: Nach Datei- und Ordnernamen suchen, im ganzen Laufwerk oder nur im aktuellen Ordner. Papierkorb und private Dateien anderer bleiben draußen
+- Das Update-Center zeigt jetzt dauerhaft, was die installierte Version gebracht hat, gegliedert nach Neu, Verbessert, Behoben und Sicherheit. Ältere Versionen lassen sich aufklappen
+- Nach einem Update erscheint für Administratoren einmal ein Hinweis mit dem Link zu den Neuigkeiten
+
+### Verbessert
+- Dashboard aufgeräumt: Alle Kacheln haben dieselbe Schrift und Ordnung
+- Das Update-Center erklärt, wie du ein Update von Hand einspielst
+
+### Behoben
+- Dashboard: Werte und Beschriftungen brechen nicht mehr um, der Abschalt-Timer passt auch auf sehr schmale Handys
+
+### Sicherheit
+- Hochgeladene Webseiten und SVG-Dateien werden nicht mehr direkt im Browser geöffnet, sondern heruntergeladen. So kann eine fremde Datei nichts mehr mit deiner Anmeldung anstellen
+- PiNAS sucht und lädt Updates nicht mehr selbst aus dem Internet. Die Suche aus 1.3.0 ist entfernt, Updates spielst du von Hand ein
+- Nach dem Abmelden ist eine Anmeldung sofort ungültig, auch wenn jemand sie kopiert hat
+- Verborgene Ordner sind auch auf exFAT-Platten zuverlässig geschützt
+- Formulare ohne gültige Anmeldesitzung werden abgelehnt
+- Beim Hochladen nimmt PiNAS nie mehr an als angemeldet
+- Netzlaufwerk: Daten werden verschlüsselt übertragen, wenn der Computer das kann. Nach 10 falschen Passwörtern ist das Konto dort 15 Minuten gesperrt
 
 ## 1.3.0
 - Neues Fehlerprotokoll im Dashboard (nur für Administratoren): PiNAS schreibt Abstürze und Fehler auf und erstellt daraus einen Fehlerbericht zum Herunterladen, ohne Passwörter, Datei- und Benutzernamen

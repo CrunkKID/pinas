@@ -1,0 +1,7 @@
+/* Update-Center: Neuigkeiten der installierten Version */
+.upd-current { margin-bottom: 1rem; }
+.upd-current h2 { margin-top: 0; }
+.upd-notes .upd-kind { margin: .9rem 0 .3rem; font-size: .95rem; font-weight: 600; }
+.upd-notes .upd-kind-sicherheit { color: var(--accent); }
+.upd-older { margin-top: 1rem; padding-top: .75rem; border-top: 1px solid var(--border); }
+.upd-older summary { cursor: pointer; font-weight: 600; }

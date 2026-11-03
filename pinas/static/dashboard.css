@@ -1,0 +1,47 @@
+/* Kacheln im Dashboard: überall dieselbe Ordnung. Oben der Titel, darunter der große Wert,
+   unten bündig die Zeilen „Bezeichnung – Wert“, die nicht umbrechen. */
+.dash-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .dash-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (min-width: 641px) { .dash-grid .disk-card { grid-column: span 2; } }
+
+.dash-grid .stat { display: flex; flex-direction: column; gap: .5rem; }
+.dash-grid .stat > small:first-of-type { margin-bottom: .1rem; font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.dash-grid .stat strong { line-height: 1.2; white-space: nowrap; }
+.dash-grid .stat small { font-size: .85rem; }
+.stat-main { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: .5rem; }
+.stat-main small { white-space: nowrap; }
+.stat-foot { margin-top: auto; }
+
+.kv { margin: auto 0 0; display: grid; gap: .3rem; font-size: .85rem; line-height: 1.4; }
+.kv > div { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: .75rem; }
+.kv dt { margin: 0; color: var(--muted); white-space: nowrap; }
+.kv dd { margin: 0 0 0 auto; font-weight: 600; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Nur der Klartext zur Stromversorgung kann lang werden und darf umbrechen */
+.kv dd.kv-text { flex: 1 1 8rem; white-space: normal; }
+.kv .kv-sum { padding-top: .3rem; border-top: 1px solid var(--border); }
+.kv [title] { cursor: help; }
+
+.io { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: .5rem; }
+.io > div { display: grid; gap: .1rem; }
+.dash-grid .io strong { font-size: 1.4rem; }
+.io-label { font-size: .85rem; color: var(--muted); white-space: nowrap; }
+
+.dash-grid .disk-chart { margin: auto 0; }
+.dash-grid .disk-legend { font-size: .85rem; }
+.dash-grid .disk-legend dd { white-space: nowrap; }
+.dash-grid .disk-legend dt { white-space: nowrap; }
+
+/* Bereiche unter den Kacheln: Überschriften gleich hoch, mit und ohne Knopf daneben */
+.dash-sections .ev-head, .dash-sections .err-tile { align-items: center; margin: 2rem 0 .9rem; }
+.dash-sections .ev-head h2, .dash-sections .err-tile h2 { margin: 0; }
+.dash-sections > section > .card > p:last-child { margin-bottom: 0; }
+.dash-sections > section > .card > p:first-child { margin-top: 0; }
+.drive-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .1rem .6rem; }
+.drive-head .sys-badge { margin-left: 0; }
+.drive-table { overflow-x: auto; }
+
+/* Handy: Der Festplatten-Knopf bekommt die ganze Breite, sonst bräche seine Beschriftung um */
+@media (max-width: 640px) {
+  .dash-bar .power-bar { grid-template-columns: minmax(0, 1fr); }
+}

@@ -9,6 +9,7 @@
 </div></section>
 {% endblock %}
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
 {# Kennung, Name, Position und An/Aus einer Kachel (Anpassen-Modus, siehe dashboard-edit.js) #}
 {% macro tile(id, title) -%}
 data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}"{% if id in layout.hidden %} data-off{% endif %}
@@ -91,7 +92,7 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
 </div>
 {% endif %}
 
-<div class="grid">
+<div class="grid dash-grid">
   {% set pct = (s.disk.used / s.disk.total * 100) if s.disk.total else 0 %}
   <div class="card stat disk-card" {{ tile('disk', 'Festplatte') }}>
     <small>{{ data_alias or 'Festplatte' }} ({{ s.disk.path }})</small>
@@ -114,10 +115,14 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
   </div>
   <div class="card stat" {{ tile('uptime', 'Betriebszeit') }}>
     <small>Betriebszeit gesamt</small>
-    <strong id="uptime-total">{{ s.history.total_text or (s.uptime.text if s.uptime else '–') }}</strong>
-    <small>seit dem letzten Start: <span id="uptime">{{ s.uptime.text if s.uptime else '–' }}</span>
-      (<span id="boot">{{ s.uptime.since if s.uptime else '–' }}</span>)</small>
-    {% if s.history.since_text %}<small>gezählt seit {{ s.history.since_text }}</small>{% endif %}
+    {# Groß nur die erste Einheit („412 Tage“), der Rest daneben: Sonst bräche der Wert in schmalen Kacheln um #}
+    {% set total = (s.history.total_text or (s.uptime.text if s.uptime else '–')).split(' ', 2) %}
+    <div class="stat-main"><strong id="uptime-total">{{ total[:2]|join(' ') }}</strong><small id="uptime-rest">{{ total[2] if total|length > 2 else '' }}</small></div>
+    <dl class="kv">
+      <div><dt>Seit Start</dt><dd id="uptime">{{ s.uptime.text if s.uptime else '–' }}</dd></div>
+      <div><dt>Letzter Start</dt><dd id="boot">{{ s.uptime.since if s.uptime else '–' }}</dd></div>
+      {% if s.history.since_text %}<div><dt>Gezählt seit</dt><dd>{{ s.history.since_text }}</dd></div>{% endif %}
+    </dl>
   </div>
   <div class="card stat" {{ tile('io', 'Datenübertragung') }}>
     <small>Datenübertragung{% if s.io %} ({{ s.io.device }}){% endif %}</small>
@@ -125,49 +130,58 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
       <div><span class="io-label">Gelesen</span><strong id="io-read">{{ s.io.read|filesize if s.io else '–' }}</strong></div>
       <div><span class="io-label">Geschrieben</span><strong id="io-written">{{ s.io.written|filesize if s.io else '–' }}</strong></div>
     </div>
-    <small>seit dem Einschalten</small>
+    <small class="stat-foot">seit dem Einschalten</small>
   </div>
   <div class="card stat" {{ tile('net', 'Netzwerk') }}>
     <small>Netzwerk (live)</small>
     <div class="io">
-      <div><span class="io-label">↑ Hochladen zum NAS</span><strong id="net-rx">–</strong></div>
-      <div><span class="io-label">↓ Herunterladen</span><strong id="net-tx">–</strong></div>
+      <div><span class="io-label" title="Hochladen zum NAS">↑ Hochladen</span><strong id="net-rx">–</strong></div>
+      <div><span class="io-label" title="Herunterladen vom NAS">↓ Herunterladen</span><strong id="net-tx">–</strong></div>
     </div>
-    <small>seit dem Einschalten: <span id="net-total">{{ (s.net.rx|filesize ~ ' empfangen, ' ~ s.net.tx|filesize ~ ' gesendet') if s.net else '–' }}</span></small>
+    <dl class="kv">
+      <div><dt title="Seit dem Einschalten">Empfangen seit Start</dt><dd id="net-rx-total">{{ s.net.rx|filesize if s.net else '–' }}</dd></div>
+      <div><dt title="Seit dem Einschalten">Gesendet seit Start</dt><dd id="net-tx-total">{{ s.net.tx|filesize if s.net else '–' }}</dd></div>
+    </dl>
   </div>
   <div class="card stat" {{ tile('temp', 'CPU-Temperatur') }}>
     <small>CPU-Temperatur</small>
     <strong id="temp">{{ ('%.1f °C'|format(s.temp))|replace('.', ',') if s.temp is not none else '–' }}</strong>
-    <small>Höchstwert: <b id="temp-max">{{ ('%.1f °C'|format(s.history.temp_max))|replace('.', ',') if s.history.temp_max is not none else '–' }}</b>
-      <span id="temp-max-at">{{ ('am ' ~ s.history.temp_max_at_text) if s.history.temp_max_at_text else '' }}</span></small>
-    <small>Stromversorgung: <span id="throttled">{{ s.throttled or '–' }}</span></small>
+    <dl class="kv">
+      <div><dt>Höchstwert</dt><dd id="temp-max">{{ ('%.1f °C'|format(s.history.temp_max))|replace('.', ',') if s.history.temp_max is not none else '–' }}</dd></div>
+      <div><dt>Gemessen am</dt><dd id="temp-max-at">{{ s.history.temp_max_at_text or '–' }}</dd></div>
+      <div><dt>Stromversorgung</dt><dd class="kv-text" id="throttled">{{ s.throttled or '–' }}</dd></div>
+    </dl>
   </div>
   <div class="card stat" {{ tile('cpu', 'Prozessor') }}>
     <small>Prozessor-Auslastung</small>
     <strong id="cpu-pct">{{ (s.cpu.pct ~ ' %') if s.cpu else '–' }}</strong>
     <div class="bar"><span id="cpu-bar" class="{{ s.cpu.color if s.cpu }}" style="width: {{ s.cpu.pct if s.cpu else 0 }}%"></span></div>
-    <small><span class="dot {{ s.cpu.color if s.cpu else 'off' }}" id="cpu-dot"></span><b id="cpu-text">{{ s.cpu.text if s.cpu else '–' }}</b></small>
-    <small>Durchschnitt der letzten 15 Minuten: <span id="cpu-avg">{{ (s.cpu.avg15 ~ ' %') if s.cpu and s.cpu.avg15 is not none else '–' }}</span>
-      · {{ s.cpus }} Kerne</small>
+    <dl class="kv">
+      <div><dt>Zustand</dt><dd><span class="dot {{ s.cpu.color if s.cpu else 'off' }}" id="cpu-dot"></span><span id="cpu-text">{{ s.cpu.text if s.cpu else '–' }}</span></dd></div>
+      <div><dt title="Durchschnitt der letzten 15 Minuten">Schnitt 15 Minuten</dt><dd id="cpu-avg">{{ (s.cpu.avg15 ~ ' %') if s.cpu and s.cpu.avg15 is not none else '–' }}</dd></div>
+      <div><dt>Kerne</dt><dd>{{ s.cpus }}</dd></div>
+    </dl>
   </div>
   {% set e = s.energy %}
-  <div class="card stat energy-card" {{ tile('power', 'Energieverbrauch') }}>
+  <div class="card stat" {{ tile('power', 'Energieverbrauch') }}>
     <small>Energieverbrauch (live)</small>
     <strong id="energy-total">{{ ('%.1f W'|format(e.total))|replace('.', ',') if e else '–' }}</strong>
-    <dl class="energy-list">
+    <dl class="kv">
       <div><dt>Raspberry Pi</dt><dd id="energy-pi">{{ ('%.1f W'|format(e.pi))|replace('.', ',') if e and e.pi is not none else '–' }}</dd></div>
-      <div><dt>Festplatte <span class="muted" id="energy-disk-state">{{ ('(' ~ e.disk.kind ~ (', ' if e.disk.kind else '') ~ e.disk.state ~ ')') if e and e.disk else '' }}</span></dt>
-        <dd id="energy-disk">{{ ('ca. ' ~ ('%.1f W'|format(e.disk.watts))|replace('.', ',')) if e and e.disk else 'keine' }}</dd></div>
-      <div class="energy-sum"><dt>PiNAS gesamt</dt><dd id="energy-total2">{{ ('%.1f W'|format(e.total))|replace('.', ',') if e else '–' }}</dd></div>
+      <div><dt>Festplatte</dt><dd id="energy-disk">{{ ('ca. ' ~ ('%.1f W'|format(e.disk.watts))|replace('.', ',')) if e and e.disk else 'keine' }}</dd></div>
+      <div id="energy-disk-row"{% if not (e and e.disk) %} hidden{% endif %}><dt>Zustand der Platte</dt><dd id="energy-disk-state">{{ (e.disk.kind ~ (', ' if e.disk.kind else '') ~ e.disk.state) if e and e.disk else '' }}</dd></div>
+      <div class="kv-sum"><dt>PiNAS gesamt</dt><dd id="energy-total2">{{ ('%.1f W'|format(e.total))|replace('.', ',') if e else '–' }}</dd></div>
+      <div><dt title="Pi: gemessen am Stromchip plus Grundverbrauch. Festplatte: geschätzt aus Plattentyp und Zustand (der Pi kann den Strom am USB-Anschluss nicht messen). Platten mit eigenem Netzteil zählen hier mit, ziehen ihren Strom aber aus der Steckdose. Kosten bei 35 ct/kWh.">Pro Monat ⓘ</dt>
+        <dd>≈ <span id="energy-month">{{ (('%.1f kWh'|format(e.kwh_month)) ~ ' · ' ~ ('%.2f €'|format(e.euro_month)))|replace('.', ',') if e else '–' }}</span></dd></div>
     </dl>
-    <small>≈ <span id="energy-month">{{ (('%.1f kWh'|format(e.kwh_month)) ~ ' · ' ~ ('%.2f €'|format(e.euro_month)))|replace('.', ',') if e else '–' }}</span> pro Monat
-      <span class="muted" title="Pi: gemessen am Stromchip plus Grundverbrauch. Festplatte: geschätzt aus Plattentyp und Zustand (der Pi kann den Strom am USB-Anschluss nicht messen). Platten mit eigenem Netzteil zählen hier mit, ziehen ihren Strom aber aus der Steckdose. Kosten bei 35 ct/kWh.">ⓘ</span></small>
   </div>
   <div class="card stat" {{ tile('mem', 'Arbeitsspeicher') }}>
     <small>Arbeitsspeicher</small>
     <strong id="mem">{{ (s.memory.used|filesize) if s.memory else '–' }}</strong>
     <div class="bar"><span id="mem-bar" style="width: {{ (s.memory.used / s.memory.total * 100)|round(1) if s.memory else 0 }}%"></span></div>
-    <small>von {{ (s.memory.total|filesize) if s.memory else '–' }}</small>
+    <dl class="kv">
+      <div><dt>Gesamt</dt><dd>{{ (s.memory.total|filesize) if s.memory else '–' }}</dd></div>
+    </dl>
   </div>
 </div>
 
@@ -301,10 +315,13 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
 <h2>Laufwerke</h2>
 {% for d in devices %}
 <div class="card">
-  <strong>{{ d.alias or '/dev/' ~ d.name }}</strong>
-  {% if d.system %}<span class="sys-badge" title="Hier laufen Raspberry Pi OS und PiNAS – nicht für Daten gedacht">Systemlaufwerk</span>{% endif %}
-  <span class="muted">{% if d.alias %}/dev/{{ d.name }} · {% endif %}{{ d.model }} · {{ d.tran|upper }} · {{ d.size|filesize }}</span>
+  <div class="drive-head">
+    <strong>{{ d.alias or '/dev/' ~ d.name }}</strong>
+    {% if d.system %}<span class="sys-badge" title="Hier laufen Raspberry Pi OS und PiNAS – nicht für Daten gedacht">Systemlaufwerk</span>{% endif %}
+    <span class="muted">{% if d.alias %}/dev/{{ d.name }} · {% endif %}{{ d.model }} · {{ d.tran|upper }} · {{ d.size|filesize }}</span>
+  </div>
   {% if d.parts %}
+  <div class="drive-table">
   <table class="list compact">
     <thead><tr><th>Partition</th><th>Dateisystem</th><th class="num">Größe</th><th>Eingehängt</th></tr></thead>
     <tbody>
@@ -313,6 +330,7 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
     {% endfor %}
     </tbody>
   </table>
+  </div>
   {% endif %}
 </div>
 {% else %}

@@ -20,7 +20,8 @@
         set("energy-total2", w(e.total));
         set("energy-pi", e.pi != null ? w(e.pi) : "–");
         set("energy-disk", e.disk ? `ca. ${w(e.disk.watts)}` : "keine");
-        set("energy-disk-state", e.disk ? `(${e.disk.kind ? e.disk.kind + ", " : ""}${e.disk.state})` : "");
+        set("energy-disk-state", e.disk ? `${e.disk.kind ? e.disk.kind + ", " : ""}${e.disk.state}` : "");
+        document.getElementById("energy-disk-row").hidden = !e.disk;
         set("energy-month", `${e.kwh_month.toFixed(1).replace(".", ",")} kWh · ${e.euro_month.toFixed(2).replace(".", ",")} €`);
       }
       if (s.cpu) {
@@ -34,14 +35,18 @@
       }
       if (s.uptime) { set("uptime", s.uptime.text); set("boot", s.uptime.since); }
       if (s.history) {
-        if (s.history.total_text) set("uptime-total", s.history.total_text);
+        if (s.history.total_text) {
+          const words = s.history.total_text.split(" ");
+          set("uptime-total", words.slice(0, 2).join(" "));
+          set("uptime-rest", words.slice(2).join(" "));
+        }
         if (s.history.temp_max != null) {
           set("temp-max", `${s.history.temp_max.toFixed(1).replace(".", ",")} °C`);
-          set("temp-max-at", s.history.temp_max_at_text ? `am ${s.history.temp_max_at_text}` : "");
+          set("temp-max-at", s.history.temp_max_at_text || "–");
         }
       }
       if (s.io) { set("io-read", fmt(s.io.read)); set("io-written", fmt(s.io.written)); }
-      if (s.net) set("net-total", `${fmt(s.net.rx)} empfangen, ${fmt(s.net.tx)} gesendet`);
+      if (s.net) { set("net-rx-total", fmt(s.net.rx)); set("net-tx-total", fmt(s.net.tx)); }
       set("throttled", s.throttled || "–");
       const pct = s.disk.total ? (s.disk.used / s.disk.total) * 100 : 0;
       set("disk-used", fmt(s.disk.used));

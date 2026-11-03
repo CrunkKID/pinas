@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 {% from "_clock.html" import countdown_clock %}
+{# Neuigkeiten einer Version, gegliedert nach Neu, Verbessert, Behoben, Sicherheit. Ohne Gliederung: einfache Liste #}
+{% macro release_groups(section) %}
+  {% for group in section.groups or [{'title': '', 'items': section['items']}] %}
+    {% if group.title %}<h4 class="upd-kind upd-kind-{{ group.title|lower }}">{{ group.title }}</h4>{% endif %}
+    <ul>{% for item in group['items'] %}<li>{{ item }}</li>{% endfor %}</ul>
+  {% endfor %}
+{% endmacro %}
 {% block title %}Update-Center{% endblock %}
 {% block hero %}
 <section class="hero"><div class="inner">
@@ -8,43 +15,13 @@
 </div></section>
 {% endblock %}
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='update.css') }}">
 
 <div class="grid upd-top">
   <div class="card stat">
     <small>Installierte Version</small>
     <strong id="upd-installed">{{ version }}</strong>
     <small>{% if st.state == 'done' and st.time_text %}zuletzt aktualisiert am {{ st.time_text }}{% else %}PiNAS für Raspberry Pi 5{% endif %}</small>
-  </div>
-  <div class="card stat">
-    <small>Online nach Updates suchen</small>
-    {% if release.version %}
-      <strong>{{ release.version }}</strong>
-      <small>{% if release.newer %}<span class="dot ok"></span><b>Neue Version verfügbar</b>{% else %}<span class="dot off"></span>Du bist auf dem neuesten Stand{% endif %}
-        · geprüft {{ release.checked }}</small>
-      {% if release.newer and release.notes and not staged %}
-      <div class="upd-notes">
-        <h3>Neu in {{ release.version }}</h3>
-        <ul>{% for item in release.notes %}<li>{{ item }}</li>{% endfor %}</ul>
-      </div>
-      {% endif %}
-    {% elif release.error %}
-      <small class="upd-error">{{ release.error }}</small>
-      <small>geprüft {{ release.checked }}</small>
-    {% else %}
-      <small>Fragt bei GitHub nach, ob es eine neuere Version gibt. Es wird nichts automatisch installiert.</small>
-    {% endif %}
-    <div class="upd-row">
-      <form method="post" action="{{ url_for('updates.check_online') }}" class="inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn-sm">Nach Updates suchen</button>
-      </form>
-      {% if release.newer and not staged %}
-      <form method="post" action="{{ url_for('updates.download') }}" class="inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn-sm primary">Version {{ release.version }} herunterladen und prüfen</button>
-      </form>
-      {% endif %}
-    </div>
   </div>
 </div>
 
@@ -71,6 +48,24 @@
 <div class="flash error">{{ st.message }}</div>
 {% endif %}
 
+{% if notes or older_notes %}
+<div class="card upd-notes upd-current" id="neu">
+  {% if notes %}
+  <h2>Neu in Version {{ notes.version }}</h2>
+  {{ release_groups(notes) }}
+  {% endif %}
+  {% if older_notes %}
+  <details class="upd-older">
+    <summary>Ältere Versionen</summary>
+    {% for section in older_notes %}
+    <h3>Version {{ section.version }}</h3>
+    {{ release_groups(section) }}
+    {% endfor %}
+  </details>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if staged and st.state == 'staged' %}
 <h2>Bereit zur Installation</h2>
 <div class="card">
@@ -80,7 +75,7 @@
   <div class="upd-notes">
     {% for n in staged.notes %}
     <h3>Neu in {{ n.version }}</h3>
-    <ul>{% for item in n['items'] %}<li>{{ item }}</li>{% endfor %}</ul>
+    {{ release_groups(n) }}
     {% endfor %}
   </div>
   {% endif %}
@@ -175,12 +170,11 @@
 <details class="card upd-help">
   <summary>So kommst du an ein Update</summary>
   <ol>
-    <li>Oben auf <b>Nach Updates suchen</b> klicken.</li>
-    <li>Gibt es eine neue Version: <b>herunterladen und prüfen</b>.</li>
+    <li>Auf deinem PC unter <code>github.com/CrunkKID/pinas/releases</code> die Datei <code>pinas-update-….tar.gz</code> herunterladen.</li>
+    <li>Die Datei <b>so wie sie ist</b> oben auswählen oder hineinziehen und auf <b>Prüfen</b> klicken.</li>
     <li>Danach <b>Jetzt installieren</b>. Vorher wird nichts installiert.</li>
   </ol>
-  <p class="muted">Ohne Internet am PiNAS: Auf einem anderen Gerät unter <code>github.com/CrunkKID/pinas/releases</code> die Datei
-    <code>pinas-update-….tar.gz</code> herunterladen und oben auswählen oder hineinziehen → <b>Prüfen</b> → <b>Jetzt installieren</b>.</p>
+  <p class="muted">PiNAS sucht und lädt Updates bewusst nicht selbst aus dem Internet.</p>
 </details>
 {% endblock %}
 {% block scripts %}

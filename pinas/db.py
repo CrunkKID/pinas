@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS settings (
     value      TEXT NOT NULL,
     PRIMARY KEY (username, key)
 );
+-- Abgemeldete Sitzungen: Die Anmeldung steckt im Browser-Cookie, eine Kopie gälte sonst bis zum Ablauf weiter
+CREATE TABLE IF NOT EXISTS revoked_sessions (
+    sid        TEXT PRIMARY KEY,
+    expires    REAL NOT NULL
+);
 """
 
 

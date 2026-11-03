@@ -102,6 +102,7 @@
       const q = (s) => item.querySelector(s);
       const isDir = item.dataset.dir === "1";
       entries.push({ label: isDir ? "Öffnen" : "Öffnen (neuer Tab)", run: () => q(".fv-main").click() });
+      if (q(".fv-where")) entries.push({ label: "Speicherort öffnen", run: () => q(".fv-where").click() });
       entries.push({ label: isDir ? "Als ZIP herunterladen" : "Herunterladen", run: () => q("[data-download]").click() });
       entries.push("-",
         { label: "Umbenennen", run: () => q("[data-rename]").click() },

@@ -53,6 +53,17 @@ def keep_login() -> None:
     session["pw"] = _pw_stamp(users.get_user(get_db(), g.user["username"]))
 
 
+def _revoke_session() -> None:
+    """Nach dem Abmelden gilt diese Sitzung auch dann nicht mehr, wenn jemand das Cookie kopiert hat."""
+    sid = session.get("sid")
+    if sid:
+        conn = get_db()
+        conn.execute("DELETE FROM revoked_sessions WHERE expires < ?", (time.time(),))
+        conn.execute("INSERT OR REPLACE INTO revoked_sessions (sid, expires) VALUES (?, ?)",
+                     (sid, time.time() + current_app.permanent_session_lifetime.total_seconds()))
+        conn.commit()
+
+
 @bp.app_context_processor
 def inject():
     return {"csrf_token": csrf_token, "user": g.get("user")}
@@ -76,12 +87,18 @@ def load_user_and_check_csrf():
     uid = session.get("uid")
     if uid is not None:
         g.user = get_db().execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
-        if g.user is None or not hmac.compare_digest(session.get("pw", ""), _pw_stamp(g.user)):
+        sid = session.get("sid")
+        if (g.user is None or not hmac.compare_digest(session.get("pw", ""), _pw_stamp(g.user))
+                or (sid and get_db().execute("SELECT 1 FROM revoked_sessions WHERE sid = ?", (sid,)).fetchone())):
             g.user = None
             session.clear()
+        elif not sid:
+            session["sid"] = secrets.token_urlsafe(16)  # Anmeldungen von vor dieser Version
     if request.method == "POST":
         sent = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token", "")
-        if not hmac.compare_digest(sent, session.get("csrf", "")):
+        expected = session.get("csrf", "")
+        # Ohne Sitzung gibt es keinen gültigen Wert: Leer darf nicht zu leer passen
+        if not expected or not hmac.compare_digest(sent.encode(), expected.encode()):
             abort(400, "Ungültiges oder abgelaufenes Formular – bitte Seite neu laden.")
 
 
@@ -123,6 +140,7 @@ def login():
         session.permanent = True
         session["uid"] = row["id"]
         session["pw"] = _pw_stamp(row)
+        session["sid"] = secrets.token_urlsafe(16)
         events.log("login", username=row["username"])
         nxt = request.args.get("next", "")
         # Nur relative Pfade zulassen (kein Open Redirect)
@@ -157,6 +175,7 @@ def setup():
             session.permanent = True
             session["uid"] = row["id"]
             session["pw"] = _pw_stamp(row)
+            session["sid"] = secrets.token_urlsafe(16)
             flash("Willkommen! Als Nächstes die Festplatte einrichten.", "ok")
             return redirect(url_for("disk.index"))
     return render_template("setup.html")
@@ -170,6 +189,7 @@ def logout():
         flash(transfers.describe(running), "error")
         return redirect(url_for("index"))
     events.log("logout")
+    _revoke_session()
     session.clear()
     return redirect(url_for("auth.login"))
 

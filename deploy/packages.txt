@@ -15,8 +15,6 @@ exfatprogs
 # Verschlüsselte Weboberfläche
 nginx
 openssl
-# Sichere Verbindung zu GitHub für „Nach Updates suchen“, auf Raspberry Pi OS schon vorhanden
-?ca-certificates
 # Samba-Module "recycle" (Papierkorb) und "full_audit" (Ereignis-Protokoll) fürs Netzlaufwerk
 # (je nach Debian-Version schon in samba enthalten)
 ?samba-vfs-modules

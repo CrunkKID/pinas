@@ -1,18 +1,15 @@
-"""Update-Center: neue PiNAS-Versionen hochladen oder von GitHub holen und installieren.
+"""Update-Center: neue PiNAS-Versionen von Hand hochladen und installieren. Der Pi lädt bewusst nichts selbst aus dem Internet.
 
 Prüfen und Installieren übernimmt /usr/local/sbin/pinas-update als root (über pinas-helper);
 diese Seite legt nur das Paket ab und zeigt den Fortschritt an."""
-import hashlib
 import json
 import re
-import ssl
-import urllib.error
-import urllib.request
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from flask import Blueprint, current_app, flash, g, jsonify, redirect, render_template, request, url_for
+from markupsafe import Markup, escape
 
 from . import transfers, users
 from .auth import admin_required, helper
@@ -22,11 +19,6 @@ from .helper import HelperError
 bp = Blueprint("updates", __name__, url_prefix="/update")
 
 _MAX_UPLOAD = 50 * 1024 * 1024
-_TIMEOUT = 20
-
-
-class _DownloadRefused(Exception):
-    """Das heruntergeladene Paket wird aus Sicherheitsgründen nicht weiterverwendet."""
 
 
 def current_version() -> str:
@@ -36,8 +28,62 @@ def current_version() -> str:
         return "0.0.0"
 
 
-def _vt(v: str) -> tuple:
-    return tuple(int(x) for x in re.findall(r"\d+", v)[:3]) or (0,)
+def parse_changelog(text: str) -> list[dict]:
+    """Abschnitte aus CHANGELOG.md: „## x.y.z“, darunter wahlweise „### Neu“, „### Verbessert“, „### Behoben“,
+    „### Sicherheit“ und Punkte mit „- “. Ältere Abschnitte ohne Gliederung ergeben eine Gruppe ohne Überschrift."""
+    sections, section, group = [], None, None
+    for line in text.splitlines():
+        if m := re.match(r"^##\s+(\d+\.\d+\.\d+)", line):
+            section, group = {"version": m.group(1), "groups": []}, None
+            sections.append(section)
+        elif section is None:
+            continue
+        elif m := re.match(r"^###\s+(.+)", line):
+            group = {"title": m.group(1).strip(), "items": []}
+            section["groups"].append(group)
+        elif line.startswith("- "):
+            if group is None:
+                group = {"title": "", "items": []}
+                section["groups"].append(group)
+            group["items"].append(line[2:].strip())
+    return sections
+
+
+def _release_notes() -> tuple[dict | None, list[dict]]:
+    """Neuigkeiten der installierten Version und alle älteren."""
+    try:
+        text = (Path(__file__).parent / "CHANGELOG.md").read_text(encoding="utf-8")
+    except OSError:
+        return None, []
+    sections = parse_changelog(text)
+    version = current_version()
+    for i, section in enumerate(sections):
+        if section["version"] == version:
+            return section, sections[i + 1:]
+    return None, sections
+
+
+@bp.before_app_request
+def announce_update():
+    """Einmal pro Administrator: Nach einem Update auf der nächsten Seite auf die Neuigkeiten hinweisen."""
+    user = g.get("user")
+    if not user or not user["is_admin"] or request.method != "GET" or request.endpoint in (None, "static"):
+        return
+    # Nur richtige Seitenaufrufe, nicht die Abfragen im Hintergrund
+    if request.headers.get("Sec-Fetch-Dest", "document") != "document" or request.path.startswith("/api/"):
+        return
+    conn = get_db()
+    version = current_version()
+    row = conn.execute("SELECT value FROM settings WHERE username = ? AND key = 'seen_version'", (user["username"],)).fetchone()
+    if row and row["value"] == version:
+        return
+    conn.execute("INSERT OR REPLACE INTO settings (username, key, value) VALUES (?, 'seen_version', ?)",
+                 (user["username"], version))
+    conn.commit()
+    st = status()
+    if st.get("state") == "done" and st.get("version") == version and request.endpoint != "updates.index":
+        link = url_for("updates.index") + "#neu"
+        flash(Markup('PiNAS läuft jetzt mit Version {}. <a href="{}">Was ist neu?</a>').format(escape(version), link), "ok")
 
 
 def _read_json(name: str) -> dict:
@@ -112,20 +158,10 @@ def index():
     from .dashboard import power_state
     pending = power_state()["pending"]
     reboot_at = pending["at"] if pending and pending.get("action") == "update-reboot" else None
-    release = _last_check()
-    if release.get("version"):  # Die letzte Suche kann von vor dem Update stammen
-        release["newer"] = _vt(release["version"]) > _vt(current_version())
+    notes, older_notes = _release_notes()
     return render_template("update.html", version=current_version(), staged=staged, st=st, log=log,
                            has_previous=(current_app.config["UPDATE_DIR"] / "previous").is_dir(),
-                           release=release, reboot_at=reboot_at)
-
-
-def _last_check() -> dict:
-    """Ergebnis der letzten Online-Suche (wird nur für die Anzeige zwischengespeichert)."""
-    try:
-        return json.loads((_upload_dir() / "release.json").read_text())
-    except (OSError, ValueError):
-        return {}
+                           reboot_at=reboot_at, notes=notes, older_notes=older_notes)
 
 
 @bp.get("/status")
@@ -153,96 +189,6 @@ def upload():
         flash("Die Datei ist zu groß für ein PiNAS-Update.", "error")
     else:
         _stage(dest)
-    return redirect(url_for("updates.index"))
-
-
-def _github_problem(exc: Exception) -> str:
-    """Verständliche Meldung, wenn die Anfrage an GitHub nicht geklappt hat."""
-    if isinstance(exc, urllib.error.HTTPError):
-        if exc.code in (403, 429):
-            return "GitHub erlaubt ohne Anmeldung nur 60 Anfragen pro Stunde. Bitte später noch einmal suchen."
-        if exc.code == 404:
-            return "Das PiNAS-Verzeichnis auf GitHub wurde nicht gefunden."
-        return f"GitHub antwortet gerade nicht wie erwartet (Fehler {exc.code}). Bitte später noch einmal suchen."
-    if isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError):
-        return "Die sichere Verbindung zu GitHub ließ sich nicht prüfen. Stimmt die Uhrzeit des PiNAS?"
-    if isinstance(exc, ValueError):
-        return "GitHub hat eine unerwartete Antwort geschickt. Bitte später noch einmal suchen."
-    return "GitHub ist nicht erreichbar. Hat PiNAS gerade Internet?"
-
-
-def _newest_package(releases: list) -> tuple[dict, dict, str] | None:
-    """Höchste Version mit Update-Paket. Andere Releases (Android-App, SD-Karten-Image) zählen nicht."""
-    best = None
-    for rel in releases:
-        if rel.get("draft") or rel.get("prerelease"):
-            continue
-        for asset in rel.get("assets", []):
-            m = re.fullmatch(r"pinas-update-(\d+\.\d+\.\d+)\.tar\.gz", asset.get("name", ""))
-            if m and (best is None or _vt(m.group(1)) > _vt(best[2])):
-                best = (rel, asset, m.group(1))
-    return best
-
-
-@bp.post("/suchen")
-@admin_required
-def check_online():
-    """Fragt die GitHub-Releases ab (nur lesend, nichts wird installiert)."""
-    repo = current_app.config["UPDATE_REPO"]
-    result = {"checked": datetime.now().strftime("%d.%m.%Y, %H:%M Uhr")}
-    try:
-        req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases?per_page=30",
-                                     headers={"Accept": "application/vnd.github+json", "User-Agent": "PiNAS"})
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            found = _newest_package(json.load(resp))
-        if not found:
-            result["error"] = "Auf GitHub ist noch kein Update veröffentlicht."
-        else:
-            rel, asset, version = found
-            notes = [line[2:].strip() for line in (rel.get("body") or "").splitlines() if line.startswith("- ")]
-            result.update(version=version, url=asset["browser_download_url"], digest=asset.get("digest") or "",
-                          notes=notes[:30])
-    except (OSError, ValueError, KeyError, AttributeError, TypeError) as exc:
-        result["error"] = _github_problem(exc if isinstance(exc, OSError) else ValueError())
-    (_upload_dir() / "release.json").write_text(json.dumps(result, ensure_ascii=False))
-    return redirect(url_for("updates.index"))
-
-
-@bp.post("/herunterladen")
-@admin_required
-def download():
-    rel = _last_check()
-    url = rel.get("url", "")
-    # Nur Download-Links von GitHub zum eigenen Repository akzeptieren
-    if not url.startswith(f"https://github.com/{current_app.config['UPDATE_REPO']}/releases/download/"):
-        flash("Bitte zuerst nach Updates suchen.", "error")
-        return redirect(url_for("updates.index"))
-    dest = _upload_dir() / f"download-{uuid.uuid4().hex}.pkg"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "PiNAS"})
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp, open(dest, "wb") as out:
-            # GitHub leitet zum eigentlichen Speicherort um – auch der muss verschlüsselt sein
-            if not resp.geturl().startswith("https://"):
-                raise _DownloadRefused("Das Paket wäre unverschlüsselt angekommen.")
-            total, sha = 0, hashlib.sha256()
-            while chunk := resp.read(1 << 16):
-                total += len(chunk)
-                if total > _MAX_UPLOAD:
-                    raise _DownloadRefused("Das Paket ist zu groß für ein PiNAS-Update.")
-                sha.update(chunk)
-                out.write(chunk)
-        digest = rel.get("digest", "")
-        if digest.startswith("sha256:") and digest != f"sha256:{sha.hexdigest()}":
-            raise _DownloadRefused("Die Prüfsumme stimmt nicht mit GitHub überein.")
-    except _DownloadRefused as exc:
-        dest.unlink(missing_ok=True)
-        flash(f"Download abgelehnt: {exc}", "error")
-        return redirect(url_for("updates.index"))
-    except (OSError, ValueError) as exc:
-        dest.unlink(missing_ok=True)
-        flash(f"Download fehlgeschlagen: {_github_problem(exc)}", "error")
-        return redirect(url_for("updates.index"))
-    _stage(dest)
     return redirect(url_for("updates.index"))
 
 

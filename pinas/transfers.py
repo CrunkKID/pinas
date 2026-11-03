@@ -21,7 +21,7 @@ _active: dict[str, dict] = {}
 _done: dict[str, dict] = {}
 
 
-def _browser() -> str:
+def browser() -> str:
     # Der CSRF-Wert gehört zur Anmeldung in genau diesem Browser
     return hashlib.sha256(session.get("csrf", "").encode()).hexdigest()
 
@@ -40,7 +40,7 @@ def begin(kind: str, name: str, size: int, tid: str = "", **extra) -> dict:
         if not _ID.match(tid) or tid in _active or tid in _done:
             tid = uuid.uuid4().hex
         entry = {"id": tid, "kind": kind, "name": name, "size": size, "done": 0, "cancel": False,
-                 "user": g.user["username"], "browser": _browser(), "touched": time.monotonic(),
+                 "user": g.user["username"], "browser": browser(), "touched": time.monotonic(),
                  "lock": threading.Lock(), **extra}
         _active[tid] = entry
     return entry
@@ -83,7 +83,7 @@ def busy() -> list[dict]:
 
 def mine() -> list[dict]:
     """Übertragungen, die in diesem Browser laufen."""
-    me = _browser()
+    me = browser()
     return [e for e in busy() if e["browser"] == me]
 
 

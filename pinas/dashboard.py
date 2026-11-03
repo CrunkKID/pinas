@@ -107,7 +107,7 @@ def uptime() -> dict | None:
         return None
     secs = int(float(raw.split()[0]))
     since = datetime.now() - timedelta(seconds=secs)
-    return {"text": format_duration(secs), "since": since.strftime("%d.%m.%Y, %H:%M Uhr")}
+    return {"text": format_duration(secs), "since": since.strftime("%d.%m.%Y, %H:%M")}
 
 
 def history() -> dict:
@@ -115,7 +115,7 @@ def history() -> dict:
     hist = current_app.extensions["pinas_history"]
     hist.sample()
     h = hist.snapshot()
-    fmt = lambda ts: datetime.fromtimestamp(ts).strftime("%d.%m.%Y, %H:%M Uhr") if ts else None
+    fmt = lambda ts: datetime.fromtimestamp(ts).strftime("%d.%m.%Y, %H:%M") if ts else None
     return {
         "total_text": format_duration(h["total"]) if h["since"] else None,
         "since_text": fmt(h["since"]),
