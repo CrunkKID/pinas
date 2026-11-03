@@ -11,6 +11,29 @@
   const status = document.getElementById("nav-status");
   const THRESHOLD = 6;
 
+  // ---------- Karte „Optionen“ ----------
+  const card = document.getElementById("nav-card");
+  const narrow = () => matchMedia("(max-width: 760px)").matches;
+  // Die Reiter scrollen nur so weit, wie die Karte Platz lässt
+  const noteCardHeight = () => nav.style.setProperty("--nav-card-h", `${card.offsetHeight}px`);
+  new ResizeObserver(noteCardHeight).observe(card);
+  matchMedia("(max-width: 760px)").addEventListener("change", () => window.pinasNavCardDefault());
+  // Am PC merken, ob sie zugeklappt wurde; auf dem Handy ist sie ein Menü und startet immer zu
+  let cardByCode = false;
+  card.addEventListener("toggle", () => {
+    if (cardByCode || narrow()) return;
+    try { localStorage.setItem("pinasNavCard", card.open ? "auf" : "zu"); } catch {}
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (narrow() && card.open && !sorting && !card.contains(e.target)) card.open = false;
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && narrow() && card.open && !sorting) {
+      card.open = false;
+      card.querySelector("summary").focus();
+    }
+  });
+
   const tabs = () => [...list.querySelectorAll("a[data-tab]")];
   const current = () => tabs().map((t) => t.dataset.tab);
   const say = (text) => { status.textContent = text; };
@@ -54,6 +77,11 @@
 
   function setSorting(on) {
     sorting = on;
+    if (on && !card.open) {  // Nur fürs Sortieren aufgeklappt, das zählt nicht als Wunsch
+      cardByCode = true;
+      card.open = true;
+      setTimeout(() => { cardByCode = false; }, 100);
+    }
     nav.classList.toggle("sorting", on);
     panel.hidden = !on;
     toggle.setAttribute("aria-pressed", String(on));

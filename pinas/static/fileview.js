@@ -108,7 +108,8 @@
       }
       entries.push({ label: isDir ? "Öffnen" : "Öffnen (neuer Tab)", run: () => q(".fv-main").click() });
       if (q(".fv-where")) entries.push({ label: "Speicherort öffnen", run: () => q(".fv-where").click() });
-      entries.push({ label: isDir ? "Als ZIP herunterladen" : "Herunterladen", run: () => q("[data-download]").click() });
+      entries.push({ label: "Herunterladen", run: () => q("[data-download]").click() });
+      if (isDir) entries.push({ label: "Als ZIP herunterladen", run: () => window.PiNASFiles.downloadZip(item) });
       entries.push("-", ...(window.PiNASEdit?.itemEntries(item) || []));
       if (q("[data-rename]")) {  // fehlen bei „nur ansehen“
         const many = item.classList.contains("fv-selected") && selected > 1;

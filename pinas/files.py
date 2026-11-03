@@ -128,7 +128,8 @@ def trash_place(root: str, base: Path) -> tuple[str, Path]:
 def _read_only_shares():
     # An einer Stelle für alle Änderungen: Wer eine Freigabe nur ansehen darf, kommt mit POST nicht weiter
     root = (request.view_args or {}).get("root")
-    if request.method == "POST" and request.endpoint != "files.selection" and shares.is_share_root(root) and not can_write(root):
+    if (request.method == "POST" and request.endpoint not in ("files.selection", "files.single_files")
+            and shares.is_share_root(root) and not can_write(root)):
         abort(make_response(jsonify(error="Dieser Ordner ist für dich nur zum Ansehen freigegeben."), 403))
 
 
@@ -397,7 +398,8 @@ def browse(root, sub=""):
         rng = request.headers.get("Range", "")
         if not rng or rng.startswith("bytes=0-"):
             if request.args.get("dl") == "1":
-                events.log("download", f"{root_label(root)}/{rel(base, target)}", events.size_of(target))
+                if not _in_batch(root, rel(base, target)):
+                    events.log("download", f"{root_label(root)}/{rel(base, target)}", events.size_of(target))
             elif request.headers.get("Sec-Fetch-Dest", "document") == "document":
                 events.log("open", f"{root_label(root)}/{rel(base, target)}", events.size_of(target))
         want_download = request.args.get("dl") == "1"
@@ -633,6 +635,11 @@ def selection(root):
         name = clean_name(str(data.get("name", "")))
     except ValueError:
         name = "Auswahl"
+    ticket = _remember_selection(root, paths, name)
+    return jsonify(href=url_for("files.selection_download", root=root, ticket=ticket))
+
+
+def _remember_selection(root: str, paths: list, name: str, files: set | None = None) -> str:
     ticket = uuid.uuid4().hex
     now = time.monotonic()
     with _selections_lock:
@@ -641,8 +648,54 @@ def selection(root):
                 del _selections[key]
         while len(_selections) >= _SELECTION_MAX:
             del _selections[next(iter(_selections))]
-        _selections[ticket] = {"root": root, "paths": paths, "name": name, "user": g.user["username"], "at": now}
-    return jsonify(href=url_for("files.selection_download", root=root, ticket=ticket))
+        _selections[ticket] = {"root": root, "paths": paths, "name": name, "user": g.user["username"], "at": now, "files": files}
+    return ticket
+
+
+def _shown_names(paths: list) -> str:
+    names = [p.rsplit("/", 1)[-1] for p in paths]
+    return ", ".join(names[:3]) + (f" und {len(names) - 3} weitere" if len(names) > 3 else "")
+
+
+def _in_batch(root: str, path: str) -> bool:
+    """Gehört der Download zu einer angemeldeten Liste? Dann steht er schon zusammengefasst im Protokoll. Nur genau die
+    Dateien der Liste: Andere Downloads lassen sich so nicht am Protokoll vorbeischleusen."""
+    with _selections_lock:
+        sel = _selections.get(request.args.get("sammel", ""))
+        if not sel or not sel["files"] or sel["root"] != root or sel["user"] != g.user["username"] or path not in sel["files"]:
+            return False
+        sel["at"] = time.monotonic()  # eine lange Liste läuft nicht mittendrin ab
+    return True
+
+
+# Mehrere Einträge einzeln statt als ZIP: Der Server nennt nur, was dazugehört, und zwar nach denselben Regeln wie
+# beim ZIP (Rechte, Freigaben, keine Symlinks). Jede Datei holt der Browser danach über ihre normale Adresse.
+@bp.post("/api/einzeln/<root>")
+@login_required
+def single_files(root):
+    paths = (request.get_json(silent=True) or {}).get("paths")
+    if not (isinstance(paths, list) and paths and all(isinstance(p, str) for p in paths)):
+        return jsonify(error="Es ist nichts ausgewählt."), 400
+    entry = {"size": 0}
+    items, skipped = _selection_contents(root, paths, entry)
+    base = root_dir(root)
+    files, dirs = [], []
+    for path, arc, is_dir in items:
+        try:
+            arc.encode()  # kaputt kodierter Name: ließe sich nicht als Adresse schicken
+            if is_dir:
+                dirs.append(arc)
+            else:
+                files.append({"path": rel(base, path), "arc": arc, "size": path.stat().st_size})
+        except (OSError, UnicodeEncodeError):
+            skipped.append(arc)
+    size = sum(f["size"] for f in files)
+    ticket = _remember_selection(root, paths, "", {f["path"] for f in files})
+    events.log("download", f"{root_label(root)}: {_shown_names(paths)} (einzeln, {len(files)} Dateien)", size)
+    resp = jsonify(base=url_for("files.browse", root=root), ticket=ticket, files=files, dirs=dirs, size=size,
+                   skipped=[s.encode("utf-8", "replace").decode() for s in skipped])
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @bp.get("/api/auswahl/<root>/<ticket>")
@@ -658,9 +711,7 @@ def selection_download(root, ticket):
     except Exception:
         transfers.end(entry, remember=True)
         raise
-    names = [p.rsplit("/", 1)[-1] for p in sel["paths"]]
-    shown = ", ".join(names[:3]) + (f" und {len(names) - 3} weitere" if len(names) > 3 else "")
-    events.log("download", f"{root_label(root)}: {shown} (Auswahl als ZIP)", entry["size"])
+    events.log("download", f"{root_label(root)}: {_shown_names(sel['paths'])} (Auswahl als ZIP)", entry["size"])
     return _zip_response(sel["name"], items, skipped, entry)
 
 

@@ -99,7 +99,7 @@
   </symbol>
 </svg>
 
-<div id="dropzone" class="dropzone" data-view="details" data-upload="{{ url_for('files.upload', root=root) }}" data-selection="{{ url_for('files.selection', root=root) }}" data-dir="{{ sub }}" data-root="{{ root }}" data-writable="{{ 1 if writable else 0 }}"{% if quota_free is not none %} data-quota-free="{{ quota_free }}"{% endif %}>
+<div id="dropzone" class="dropzone" data-view="details" data-upload="{{ url_for('files.upload', root=root) }}" data-selection="{{ url_for('files.selection', root=root) }}" data-singles="{{ url_for('files.single_files', root=root) }}" data-dir="{{ sub }}" data-root="{{ root }}" data-writable="{{ 1 if writable else 0 }}"{% if quota_free is not none %} data-quota-free="{{ quota_free }}"{% endif %}>
   <div id="listing">
   {% if search %}
   {% set place = roots[root] ~ (' › ' ~ sub|replace('/', ' › ') if search.scope else '') %}
@@ -145,7 +145,7 @@
         {% if e.is_dir %}<span class="fv-size fv-dirsize" title="Wird berechnet …">…</span>{% else %}<span class="fv-size">{{ e.size|filesize }}</span>{% endif %}
         <span class="fv-date">{{ e.mtime }}</span>
         <span class="fv-actions">
-          <a class="btn-sm" data-download href="{{ url_for('files.browse', root=root, sub=e.path, dl=1) }}" title="{{ 'Ordner als ZIP herunterladen' if e.is_dir else 'Herunterladen' }}">⬇</a>
+          <a class="btn-sm" data-download href="{{ url_for('files.browse', root=root, sub=e.path, dl=1) }}" title="{{ 'Ordner herunterladen' if e.is_dir else 'Herunterladen' }}">⬇</a>
           {% if writable %}
           <button class="btn-sm" data-rename="{{ e.path }}" data-name="{{ e.name }}" title="Umbenennen">✎</button>
           <button class="btn-sm danger" data-delete="{{ e.path }}" data-name="{{ e.name }}" title="Löschen">🗑</button>

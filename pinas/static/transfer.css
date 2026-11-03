@@ -15,6 +15,13 @@
 .xfer-note { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
 .xfer-note[hidden] { display: none; }
 .xfer-note button { padding: 0; font-size: inherit; text-decoration: underline; }
+.xfer-choice { overflow-wrap: anywhere; }
+.xfer-choice[hidden] { display: none; }
+.xfer-choice div { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+.xfer-missing { font-size: .85rem; }
+.xfer-missing[hidden] { display: none; }
+.xfer-missing summary { cursor: pointer; }
+.xfer-missing ul { max-height: 10rem; margin: .3rem 0 0; padding-left: 1.1rem; overflow-y: auto; overflow-wrap: anywhere; }
 .xfer-pct { font-size: 1.05rem; }
 .xfer-bar { height: 8px; overflow: hidden; background: var(--band); border-radius: var(--pill); }
 .xfer-bar span { display: block; width: 0; height: 100%; background: var(--accent); transition: width .2s; }

@@ -155,21 +155,40 @@
     }
   });
 
-  // Eine Auswahl aus nur einem Eintrag lädt wie dessen eigener Knopf; mehrere werden ein ZIP.
-  // Synchron im Klick, der Speicherort-Dialog ist nur dort erlaubt.
-  document.getElementById("pick-download").addEventListener("click", () => {
-    const items = pickedItems();
-    if (items.length === 1) { items[0].querySelector("[data-download]").click(); return; }
-    const found = !!items[0].querySelector(".fv-where");  // Suchtreffer liegen in verschiedenen Ordnern
+  // Als ZIP nur auf ausdrücklichen Wunsch: im Rechtsklick-Menü oder wenn der Browser keine Ordner anlegen kann
+  function zipJob(items) {
+    if (items.length === 1) {
+      const it = items[0];
+      const dest = it.querySelector(".fv-where")?.dataset.place || place();  // Suchtreffer liegen anderswo
+      return { href: it.querySelector("[data-download]").href, name: it.dataset.name, dest, size: 0, isDir: true };
+    }
+    const found = !!items[0].querySelector(".fv-where");
     const dest = found ? crumbs()[0] : place();
-    transfer.download({
+    return {
       paths: items.map((it) => it.dataset.path), url: zone.dataset.selection, size: 0, isDir: true, dest,
       name: found ? "Suchtreffer" : `Auswahl aus ${crumbs().pop()}`,
       what: `${items.length} Einträge als ZIP aus ${dest}`,
+    };
+  }
+
+  // Synchron im Klick, der Dialog für den Zielordner ist nur dort erlaubt
+  function downloadSingly(items) {
+    const zip = zipJob(items);
+    transfer.downloadItems({
+      paths: items.map((it) => it.dataset.path), url: zone.dataset.singles, dest: zip.dest,
+      hasDirs: items.some((it) => it.dataset.dir === "1"), zip,
     });
+  }
+
+  // Eine Auswahl aus nur einer Datei lädt wie deren eigener Knopf; sonst Datei für Datei in einen Zielordner
+  document.getElementById("pick-download").addEventListener("click", () => {
+    const items = pickedItems();
+    if (items.length === 1 && items[0].dataset.dir !== "1") items[0].querySelector("[data-download]").click();
+    else downloadSingly(items);
   });
 
-  window.PiNASFiles = { refresh: refreshListing, sizes: loadSizes, selected: pickedItems, clearSelection: () => pickAll(false), place };
+  window.PiNASFiles = { refresh: refreshListing, sizes: loadSizes, selected: pickedItems, clearSelection: () => pickAll(false), place,
+                        downloadZip: (item) => transfer.download(zipJob([item])) };
   loadSizes();
 
   // Suche: Das Formular lädt die Seite ganz normal neu (geht so auch im Rahmen und mit „Zurück“).
@@ -241,9 +260,9 @@
       if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;  // z. B. Strg+Klick: neuer Tab
       e.preventDefault();
       const item = dl.closest(".fv-item");
-      const isDir = item.dataset.dir === "1";
+      if (item.dataset.dir === "1") { downloadSingly([item]); return; }
       const dest = item.querySelector(".fv-where")?.dataset.place || place();  // Suchtreffer liegen anderswo
-      transfer.download({ href: dl.href, name: item.dataset.name, dest, size: isDir ? 0 : +item.dataset.size, isDir });
+      transfer.download({ href: dl.href, name: item.dataset.name, dest, size: +item.dataset.size, isDir: false });
       return;
     }
     const btn = e.target.closest("[data-rename], [data-delete]");

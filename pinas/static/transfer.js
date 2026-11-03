@@ -42,20 +42,26 @@
 
   // Gerundet, damit die Anzeige ruhig bleibt: unter 10 mit einer Nachkommastelle, ab 100 in Fünferschritten
   const roundShort = (n) => (n < 10 ? n.toFixed(1).replace(".", ",") : n < 100 ? Math.round(n) : Math.round(n / 5) * 5);
-  const fmtRate = (bps) => (bps < 1024 * 1024 ? `${Math.round(bps / 1024)} KB/s` : `${roundShort(bps / 1024 / 1024)} MB/s`);
+  const fmtRate = (bps) => {
+    const mb = bps / 1024 / 1024;
+    if (mb < 1) return `${Math.round(bps / 1024)} KB/s`;
+    return `${mb < 100 ? mb.toFixed(1).replace(".", ",") : Math.round(mb)} MB/s`;
+  };
   const fmtMbit = (bps) => `${roundShort((bps * 8) / 1e6)} Mbit/s`;
 
-  // Restzeit in groben Schritten, wie im Windows-Kopierdialog
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const twoUnits = (n, big, bigs, rest, one, many) => plural(n, big, bigs) + (rest ? ` und ${plural(rest, one, many)}` : "");
+
+  // Restzeit wie im Windows-Kopierdialog: in groben Stufen, je länger, desto gröber. Erst runden, dann
+  // aufteilen, sonst stünde dort „1 Stunde und 60 Minuten“.
   function formatTime(secs) {
-    if (secs < 10) return "wenige Sekunden";
-    if (secs < 60) return `ca. ${Math.round(secs / 5) * 5} s`;
-    if (secs < 600) {
-      const halves = Math.round(secs / 30);
-      return `ca. ${Math.floor(halves / 2)}:${halves % 2 ? "30" : "00"} Min`;
-    }
-    if (secs < 3600) return `ca. ${Math.round(secs / 60)} Min`;
-    const mins = Math.round(secs / 300) * 5;
-    return `ca. ${Math.floor(mins / 60)} Std ${mins % 60} Min`;
+    const step = secs < 60 ? 5 : secs < 120 ? 10 : secs < 3600 ? 60 : secs < 86400 ? 300 : 3600;
+    const s = Math.max(5, Math.round(secs / step) * step);
+    if (s < 60) return `Etwa ${s} Sekunden`;
+    if (s < 120) return `Etwa ${twoUnits(1, "Minute", "Minuten", s - 60, "Sekunde", "Sekunden")}`;
+    if (s < 3600) return `Etwa ${plural(Math.round(s / 60), "Minute", "Minuten")}`;
+    if (s < 86400) return `Etwa ${twoUnits(Math.floor(s / 3600), "Stunde", "Stunden", Math.round((s % 3600) / 60), "Minute", "Minuten")}`;
+    return `Etwa ${twoUnits(Math.floor(s / 86400), "Tag", "Tage", Math.round((s % 86400) / 3600), "Stunde", "Stunden")}`;
   }
 
   function formatSize(bytes) {
@@ -124,6 +130,8 @@
 
   // ---------- Fenster ----------
   const SPEED_WINDOW = 6000;  // Geschwindigkeit: Mittelwert über so viele Millisekunden
+  const ETA_AFTER = 3;  // Restzeit erst nach so vielen Sekunden Messung, vorher wäre sie geraten
+  const MISSING_SHOWN = 500;
   const GRAPH_POINTS = 300;
   const stack = document.createElement("div");
   stack.className = "xfer-stack";
@@ -185,14 +193,16 @@
       <header><b class="xfer-title"></b><button type="button" class="xfer-x" title="Schließen" aria-label="Schließen">✕</button></header>
       <p class="xfer-what"></p>
       <p class="xfer-note" hidden></p>
+      <div class="xfer-choice" hidden></div>
       <p class="xfer-pct">Wird gestartet …</p>
       <div class="xfer-bar"><span></span></div>
       <canvas class="xfer-graph" aria-hidden="true"></canvas>
       <dl>
-        <dt>Geschwindigkeit</dt><dd class="xfer-speed">–</dd>
-        <dt>Verbleibende Zeit</dt><dd class="xfer-left">wird berechnet …</dd>
-        <dt>Übertragen</dt><dd class="xfer-done">–</dd>
+        <dt>Verbleibende Zeit:</dt><dd class="xfer-left">Wird berechnet …</dd>
+        <dt class="xfer-items-label">Verbleibend:</dt><dd class="xfer-done">–</dd>
+        <dt>Geschwindigkeit:</dt><dd class="xfer-speed">–</dd>
       </dl>
+      <details class="xfer-missing" hidden><summary></summary><ul></ul></details>
       <footer>
         <button type="button" class="btn-sm xfer-more">${small ? "Mehr Details" : "Weniger Details"}</button>
         <button type="button" class="btn-sm xfer-cancel">${onCancel ? "Abbrechen" : "Schließen"}</button>
@@ -203,7 +213,7 @@
     stack.append(w);
     placeStack();
 
-    let loaded = 0, total = 0, speed = 0, eta = null, raf = 0, state = "run", saving = false, timer = 0;
+    let loaded = 0, total = 0, items = null, speed = 0, eta = null, raf = 0, state = "run", saving = false, timer = 0;
     let samples = [];  // Messwerte der letzten Sekunden: {t, loaded}
     let points = [];  // Geschwindigkeitsverlauf: {x: 0…1, v: Bytes/s}
 
@@ -220,8 +230,9 @@
       const first = samples[0], secs = (t - first.t) / 1000;
       if (secs < 1) return;
       speed = Math.max(0, loaded - first.loaded) / secs;
-      // Die Restzeit zählt einfach herunter und wird nur neu gesetzt, wenn sie deutlich danebenliegt
-      const raw = speed > 0 ? (total - loaded) / speed : null;
+      // Die Restzeit zählt einfach herunter und wird nur neu gesetzt, wenn sie deutlich danebenliegt.
+      // Ohne bekannte Gesamtgröße oder ohne Daten gibt es keine: lieber keine Zeit als eine erfundene.
+      const raw = total && speed > 0 && secs >= ETA_AFTER ? Math.max(0, total - loaded) / speed : null;
       const counted = eta === null ? null : Math.max(0, eta - 1);
       eta = raw === null || counted === null || Math.abs(raw - counted) > Math.max(5, counted * 0.15) ? raw : counted;
       if (!points.length) points.push({ v: speed, x: 0 });  // Kurve am linken Rand beginnen
@@ -260,7 +271,7 @@
 
     function render() {
       raf = 0;
-      $(".xfer-speed").textContent = speed ? `${fmtMbit(speed)} (${fmtRate(speed)})` : "–";
+      $(".xfer-speed").textContent = speed ? `${fmtRate(speed)} (${fmtMbit(speed)})` : "–";
       if (state === "run" && total) {
         // 100 % erst, wenn wirklich alles abgeschlossen ist (finish)
         const pct = Math.min(99, Math.floor((loaded / total) * 100));
@@ -268,12 +279,19 @@
         barEl.style.width = pct + "%";
         if (saving) {
           pctEl.textContent = "Wird gespeichert …";
-          $(".xfer-left").textContent = "gleich fertig";
+          $(".xfer-left").textContent = "Gleich fertig";
         } else {
           pctEl.textContent = `${pct} % abgeschlossen`;
-          $(".xfer-left").textContent = eta === null ? "wird berechnet …" : formatTime(eta);
+          $(".xfer-left").textContent = eta === null ? "Wird berechnet …" : formatTime(eta);
         }
-        $(".xfer-done").textContent = `${formatSize(loaded)} von ${formatSize(total)}`;
+        const rest = formatSize(Math.max(0, total - loaded));
+        $(".xfer-items-label").textContent = items === null ? "Verbleibend:" : "Verbleibende Elemente:";
+        $(".xfer-done").textContent = items === null ? rest : `${items} (${rest})`;
+      } else if (state === "run" && loaded) {
+        pctEl.textContent = "Wird übertragen …";
+        $(".xfer-left").textContent = "Unbekannt";  // Daten kommen, aber wie viele noch, sagt niemand
+        $(".xfer-items-label").textContent = "Übertragen:";
+        $(".xfer-done").textContent = formatSize(loaded);
       }
       draw();
     }
@@ -286,6 +304,8 @@
       titleEl.textContent = title;
       pctEl.textContent = text;
       $(".xfer-left").textContent = "–";
+      $(".xfer-done").textContent = "–";
+      $(".xfer-choice").hidden = true;
       cancelBtn.textContent = "Schließen";
       schedule();
     }
@@ -325,15 +345,53 @@
         el.append(off);
         el.hidden = false;
       },
-      progress(now, all) {
+      // count: wie viele Dateien noch offen sind, die aktuelle mitgezählt. Ohne Angabe nur die Größe
+      progress(now, all, count = null) {
         loaded = now;
         total = all;
+        items = count;
         saving = false;  // bei mehreren Dateien geht es mit der nächsten weiter
         if (!timer && state === "run") {
           measure();
           timer = setInterval(measure, 1000);
         }
         schedule();
+      },
+      // Frage im Fenster selbst, „Abbrechen“ bleibt daneben erreichbar. Liefert den Schlüssel des gewählten Knopfs
+      choose(text, answers) {
+        const box = $(".xfer-choice");
+        box.textContent = text;
+        box.hidden = false;
+        const row = document.createElement("div");
+        box.append(row);
+        return new Promise((resolve) => {
+          for (const [key, label] of Object.entries(answers)) {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "btn-sm";
+            b.textContent = label;
+            b.addEventListener("click", () => { box.hidden = true; resolve(key); });
+            row.append(b);
+          }
+        });
+      },
+      // Was am Ende fehlt: Bis 5 Einträge gleich offen, längere Listen zum Aufklappen
+      missing(rows) {
+        const box = $(".xfer-missing");
+        box.querySelector("summary").textContent = rows.length === 1 ? "1 Datei fehlt" : `${rows.length} Dateien fehlen`;
+        const list = box.querySelector("ul");
+        for (const row of rows.slice(0, MISSING_SHOWN)) {
+          const li = document.createElement("li");
+          li.textContent = row;
+          list.append(li);
+        }
+        if (rows.length > MISSING_SHOWN) {
+          const li = document.createElement("li");
+          li.textContent = `… und ${rows.length - MISSING_SHOWN} weitere`;
+          list.append(li);
+        }
+        box.open = rows.length <= 5;
+        box.hidden = false;
       },
       saving() { saving = true; schedule(); },
       get speed() { return speed; },
@@ -404,7 +462,7 @@
       xhr.send(part);
     });
 
-    async function sendFile(file, before) {
+    async function sendFile(file, before, left) {
       const { id } = await post(url, { dir, name: file.name, size: file.size });
       if (!id) throw new Error("Bitte die Seite neu laden und erneut anmelden.");
       try {
@@ -412,7 +470,7 @@
           const part = file.slice(offset, offset + CHUNK);
           for (let attempt = 1; ; attempt++) {
             try {
-              await sendPart(id, part, offset, (n) => win.progress(before + offset + n, needed));
+              await sendPart(id, part, offset, (n) => win.progress(before + offset + n, needed, left));
               break;
             } catch (err) {  // kurzer Wackler im Netz: dasselbe Stück noch einmal
               if (err === ABORTED || err.final || attempt > RETRIES) throw err;
@@ -422,7 +480,7 @@
           }
         }
         if (aborted) throw ABORTED;
-        win.progress(before + file.size, needed);
+        win.progress(before + file.size, needed, left);
         win.saving();
         return (await post(`${url}/${id}/fertig`)).saved;
       } catch (err) {
@@ -439,7 +497,7 @@
         if (aborted) break;
         win.what(files.length === 1 ? `„${file.name}“ nach ${dest}` : `„${file.name}“ (${i + 1} von ${files.length}) nach ${dest}`);
         try {
-          saved.push(await sendFile(file, before));
+          saved.push(await sendFile(file, before, files.length - i));
         } catch (err) {
           if (err !== ABORTED) errors.push(files.length === 1 ? err.message : `${file.name}: ${err.message}`);
         }
@@ -466,17 +524,56 @@
   const withId = (href, id) => `${href}${href.includes("?") ? "&" : "?"}t=${id}`;
   const whatText = ({ what, name, dest, isDir }) => what || (isDir ? `Ordner „${name}“ als ZIP aus ${dest}` : `„${name}“ aus ${dest}`);
 
-  // Mehrere Einträge: Der Server merkt sich die Auswahl und nennt die Adresse des ZIPs
-  async function selectionHref({ url, paths, name }) {
+  // key: Das muss in der Antwort stehen. Sonst kam die Anmeldeseite zurück, die Sitzung ist also abgelaufen.
+  async function postJson(url, body, key, signal) {
     const r = await fetch(url, {
-      method: "POST", credentials: "same-origin",
+      method: "POST", credentials: "same-origin", signal,
       headers: { "X-CSRF-Token": window.CSRF, "Content-Type": "application/json" },
-      body: JSON.stringify({ paths, name }),
+      body: JSON.stringify(body),
     });
     const res = await r.json().catch(() => ({}));
-    if (r.ok && res.href) return res.href;
+    if (r.ok && res[key]) return res;
     throw new Error(res.error || (r.status === 503 ? "Die Festplatte ist ausgeschaltet."
       : r.ok ? "Du bist nicht mehr angemeldet. Bitte die Seite neu laden und anmelden." : `Fehler ${r.status}`));
+  }
+
+  // Mehrere Einträge als ZIP: Der Server merkt sich die Auswahl und nennt die Adresse des ZIPs
+  const selectionHref = async ({ url, paths, name }) => (await postJson(url, { paths, name }, "href")).href;
+
+  // Fehler dieser Art betreffen alles Weitere, nicht nur die eine Datei
+  const fatal = (message) => Object.assign(new Error(message), { fatal: true });
+
+  async function openDownload(href, signal) {
+    const r = await fetch(href, { cache: "no-store", credentials: "same-origin", signal });
+    if (r.redirected) throw fatal("Du bist nicht mehr angemeldet. Bitte die Seite neu laden und anmelden.");
+    if (r.status === 503) throw fatal("Die Festplatte ist ausgeschaltet.");
+    if (r.status === 404) throw new Error("Gibt es auf dem NAS nicht mehr.");
+    if (!r.ok) throw new Error(`Fehler ${r.status}`);
+    return r;
+  }
+
+  // Schreibt direkt in die Datei, Stück für Stück. Der Browser wartet dabei auf die Festplatte, im Arbeitsspeicher
+  // sammelt sich nichts. Liefert die Zahl der Bytes; bricht ab, wenn weniger ankam als angekündigt.
+  async function pour(r, writable, onBytes) {
+    const exact = +r.headers.get("Content-Length");  // ein ZIP entsteht beim Senden und nennt nur die Summe der Inhalte
+    let got = 0, filled = 0;
+    const buffer = new Uint8Array(WRITE_BLOCK);
+    const reader = r.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (filled + value.length > WRITE_BLOCK) {
+        await writable.write(buffer.subarray(0, filled));
+        filled = 0;
+      }
+      if (value.length > WRITE_BLOCK) await writable.write(value);
+      else { buffer.set(value, filled); filled += value.length; }
+      got += value.length;
+      onBytes(got);
+    }
+    if (exact && got !== exact) throw fatal("Die Verbindung zum NAS ist abgebrochen.");
+    if (filled) await writable.write(buffer.subarray(0, filled));
+    return got;
   }
 
   // Erst der Speicherort, dann die Übertragung. Der Browser erlaubt den Dialog nur direkt im Klick,
@@ -509,8 +606,7 @@
     }
   }
 
-  // Schreibt direkt in die gewählte Datei, Stück für Stück. Der Browser wartet dabei auf die Festplatte,
-  // im Arbeitsspeicher sammelt sich nichts. Gehört zu dieser Seite: Der Rahmen hält sie beim Reiterwechsel offen.
+  // Gehört zu dieser Seite: Der Rahmen hält sie beim Reiterwechsel offen.
   async function downloadToFile(job, handle) {
     const id = newId();
     const stop = new AbortController();
@@ -528,33 +624,16 @@
     }, 5000);
     try {
       const href = job.href || await selectionHref(job);
-      const r = await fetch(withId(href, id), { cache: "no-store", credentials: "same-origin", signal: stop.signal });
-      if (r.redirected) throw new Error("Du bist nicht mehr angemeldet. Bitte die Seite neu laden und anmelden.");
-      if (!r.ok) throw new Error(r.status === 503 ? "Die Festplatte ist ausgeschaltet." : `Fehler ${r.status}`);
-      const exact = +r.headers.get("Content-Length");  // ein ZIP entsteht beim Senden und nennt nur die Summe der Inhalte
-      const total = exact || +r.headers.get("X-PiNAS-Size") || job.size;
+      const r = await openDownload(withId(href, id), stop.signal);
+      const total = +r.headers.get("Content-Length") || +r.headers.get("X-PiNAS-Size") || job.size;
       writable = await handle.createWritable();
       limit = STALL_DATA;
       last = performance.now();
-      win.progress(0, total);
-      let got = 0, filled = 0;
-      const buffer = new Uint8Array(WRITE_BLOCK);
-      const reader = r.body.getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (filled + value.length > WRITE_BLOCK) {
-          await writable.write(buffer.subarray(0, filled));
-          filled = 0;
-        }
-        if (value.length > WRITE_BLOCK) await writable.write(value);
-        else { buffer.set(value, filled); filled += value.length; }
-        got += value.length;
+      win.progress(0, total, 1);  // auch ein ZIP aus vielen Dateien ist hier eine Datei
+      const got = await pour(r, writable, (n) => {
         last = performance.now();
-        win.progress(Math.min(got, total), total);
-      }
-      if (exact && got !== exact) throw new Error("Die Verbindung zum NAS ist abgebrochen.");
-      if (filled) await writable.write(buffer.subarray(0, filled));
+        win.progress(total ? Math.min(n, total) : n, total, 1);
+      });
       clearInterval(watchdog);
       win.saving();
       await writable.close();  // erst jetzt wird aus der Zwischendatei die fertige Datei
@@ -573,6 +652,16 @@
     }
   }
 
+  function clickDownload(href, name) {
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = name;
+    a.hidden = true;
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+
   // Der Browser lädt selbst (ohne Umweg über den Arbeitsspeicher, läuft auch bei Seitenwechseln weiter).
   // Wie weit er ist, meldet der Server: Er zählt mit, was er schon abgeschickt hat.
   // Fragt der Browser nach dem Speicherort, lädt er währenddessen schon. Das lässt sich von hier nicht verhindern.
@@ -587,13 +676,7 @@
     }
     const { href, name, size, isDir } = job;
     const id = newId();
-    const a = document.createElement("a");
-    a.href = withId(href, id);
-    a.download = isDir ? `${name}.zip` : name;
-    a.hidden = true;
-    document.body.append(a);
-    a.click();
-    a.remove();
+    clickDownload(withId(href, id), isDir ? `${name}.zip` : name);
 
     let cancelled = false;
     const win = transferWindow("Herunterladen", () => {
@@ -601,11 +684,6 @@
       post(`/api/uebertragung/${id}/abbrechen`).catch(() => {});
     });
     win.what(whatText(job));
-    if (matchMedia("(hover: hover)").matches) {  // Handys fragen nicht nach einem Speicherort
-      win.note("Fragt dein Browser nach dem Speicherort, lädt er währenddessen schon in eine Zwischendatei."
-        + (navigator.brave ? " In Brave geht es auch anders: Unter brave://flags/#file-system-access-api „Enabled“ wählen und Brave neu starten, falls es den Eintrag gibt. Dann fragt PiNAS zuerst nach dem Speicherort und lädt erst danach." : ""),
-        "pinas.download.hinweis");
-    }
 
     (async () => {
       changeRunning(1, false);
@@ -620,7 +698,7 @@
         } catch {}
         if (st?.known) {
           seen = true;
-          win.progress(st.done, st.size || size);
+          win.progress(st.done, st.size || size, 1);
           if (st.finished) {
             ok = st.done >= st.size;
             if (ok) {
@@ -639,6 +717,254 @@
       }
       changeRunning(-1, false);
       if (ok) win.finish(text); else win.fail(text);
+    })();
+  }
+
+  // ---------- Mehrere Dateien und Ordner einzeln, wie auf der Festplatte ----------
+  const START_WAIT = 60000;  // fragt der Browser, ob die Seite mehrere Dateien laden darf, kann die Antwort dauern
+  const SAVING_FROM = 64 * 1024 * 1024;  // „Wird gespeichert …“ nur, wo man es auch sehen kann
+  const fileCount = (n) => plural(n, "Datei", "Dateien");
+  const dirOf = (arc) => arc.slice(0, Math.max(0, arc.lastIndexOf("/")));
+  const nameOf = (arc) => arc.slice(arc.lastIndexOf("/") + 1);
+  const fileHref = (list, file) => `${list.base}${file.path.split("/").map(encodeURIComponent).join("/")}?dl=1&sammel=${list.ticket}`;
+  const fileList = ({ url, paths }, signal) => postJson(url, { paths }, "ticket", signal);
+
+  // Windows unterscheidet nicht nach Groß/Klein: „Bild.jpg“ und „bild.JPG“ aus einem Ordner dürfen sich nicht überschreiben
+  function freeNames(list) {
+    const used = new Set();
+    for (const f of list) {
+      const dot = f.arc.lastIndexOf(".");
+      const stem = dot > f.arc.lastIndexOf("/") + 1 ? f.arc.slice(0, dot) : f.arc;
+      const ext = f.arc.slice(stem.length);
+      for (let i = 2; used.has(f.arc.toLowerCase()); i++) f.arc = `${stem} (${i})${ext}`;
+      used.add(f.arc.toLowerCase());
+    }
+  }
+
+  // Ordner im Ziel öffnen oder anlegen; einmal gefundene merken, das spart bei vielen Dateien viele Zugriffe
+  function folderOpener(root) {
+    const known = new Map([["", root]]);
+    const open = async (path, create) => {
+      if (known.has(path)) return known.get(path);
+      const parent = await open(dirOf(path), create);
+      const dir = await parent.getDirectoryHandle(nameOf(path), { create });
+      known.set(path, dir);
+      return dir;
+    };
+    return open;
+  }
+
+  async function findExisting(open, list) {
+    const hits = [];
+    for (const f of list) {
+      try {
+        await (await open(dirOf(f.arc), false)).getFileHandle(nameOf(f.arc));
+        hits.push(f);
+      } catch {}  // gibt es nicht; ein Name, den der PC nicht erlaubt, fällt beim Schreiben auf
+    }
+    return hits;
+  }
+
+  // Erst der Zielordner, dann die Übertragung. Der Browser erlaubt den Dialog nur direkt im Klick, deshalb vor dem
+  // ersten await. Abbrechen im Dialog: Es passiert nichts, der Server erfährt gar nichts davon.
+  function downloadItems(job) {
+    if (!window.showDirectoryPicker) { itemsWithoutPicker(job); return; }
+    let picked;
+    try {
+      picked = window.showDirectoryPicker({ id: "pinas-ordner", mode: "readwrite", startIn: "downloads" });
+    } catch {
+      itemsWithoutPicker(job);
+      return;
+    }
+    picked.then((root) => itemsToFolder(job, root), (err) => {
+      if (err.name !== "AbortError") itemsWithoutPicker(job);
+    });
+  }
+
+  async function itemsToFolder(job, root) {
+    const stop = new AbortController();
+    let cancelled = false, stalled = false, id = null;
+    const win = transferWindow("Herunterladen", () => {
+      cancelled = true;
+      if (id) post(`/api/uebertragung/${id}/abbrechen`).catch(() => {});
+      stop.abort();
+    });
+    win.what(`Dateiliste wird geholt … (nach „${root.name}“)`);
+    changeRunning(1, true);
+    let limit = STALL_START, last = performance.now();
+    const watchdog = setInterval(() => {
+      if (performance.now() - last > limit) { stalled = true; stop.abort(); }
+    }, 5000);
+    const missing = [];
+    let saved = 0, skipped = 0, written = 0, at = 0, problem = null, left = "";
+    try {
+      const list = await fileList(job, stop.signal);
+      limit = Infinity;  // bis zur ersten Datei wartet nur der PC oder die Antwort im Fenster, nicht das Netz
+      list.skipped.forEach((arc) => missing.push(`${arc}: ließ sich auf dem NAS nicht lesen`));
+      freeNames(list.files);
+      const open = folderOpener(root);
+      win.what(`Zielordner „${root.name}“ wird geprüft …`);
+      const hits = await findExisting(open, list.files);
+      let queue = list.files;
+      if (hits.length) {
+        const answer = await Promise.race([
+          win.choose(`${fileCount(hits.length)} gibt es dort schon, z. B. „${nameOf(hits[0].arc)}“.`, { replace: "Ersetzen", keep: "Überspringen" }),
+          new Promise((resolve) => stop.signal.addEventListener("abort", () => resolve(null))),
+        ]);
+        if (answer === "keep") {
+          const known = new Set(hits);
+          queue = queue.filter((f) => !known.has(f));
+          skipped = hits.length;
+        }
+      }
+      for (const dir of list.dirs) {
+        if (cancelled) break;
+        try { await open(dir, true); } catch { missing.push(`${dir}/: Ordner ließ sich nicht anlegen`); }
+      }
+      const total = queue.reduce((sum, f) => sum + f.size, 0);
+      for (const [i, f] of queue.entries()) {
+        if (stop.signal.aborted) break;
+        at = i;
+        win.what(`„${nameOf(f.arc)}“ (${i + 1} von ${queue.length}) aus ${job.dest}`);
+        win.progress(written, total, queue.length - i);
+        id = newId();
+        limit = STALL_START;
+        last = performance.now();
+        let r = null, handle = null, writable = null;
+        try {
+          r = await openDownload(withId(fileHref(list, f), id), stop.signal);
+          limit = STALL_DATA;
+          last = performance.now();
+          try {
+            handle = await (await open(dirOf(f.arc), true)).getFileHandle(nameOf(f.arc), { create: true });
+          } catch (err) {
+            if (err instanceof TypeError) throw new Error("Dieser Name ist auf dem PC nicht erlaubt.");
+            throw err;
+          }
+          writable = await handle.createWritable();
+          await pour(r, writable, (n) => {
+            last = performance.now();
+            win.progress(Math.min(written + n, total), total, queue.length - i);
+          });
+          if (f.size >= SAVING_FROM) win.saving();
+          await writable.close();  // erst jetzt wird aus der Zwischendatei die fertige Datei
+          saved++;
+        } catch (err) {
+          r?.body?.cancel().catch(() => {});
+          if (handle) left = await discard(handle, writable);
+          if (stop.signal.aborted) break;
+          problem = err.fatal ? err.message
+            : err.name === "QuotaExceededError" ? "Am Speicherort ist nicht genug Platz."
+            : err.name === "NotAllowedError" ? "Der Browser erlaubt den Zugriff auf den Zielordner nicht mehr."
+            : err instanceof TypeError ? "Die Verbindung zum NAS ist abgebrochen." : null;
+          if (problem) {
+            queue.slice(i).forEach((rest) => missing.push(rest.arc));
+            break;
+          }
+          missing.push(`${f.arc}: ${err instanceof DOMException ? "ließ sich nicht speichern" : err.message}`);
+        }
+        written += f.size;
+      }
+      if (stalled) {  // keine Daten mehr: Die offene Datei und alle danach fehlen
+        problem = "Die Verbindung zum NAS ist abgebrochen.";
+        queue.slice(at).forEach((rest) => missing.push(rest.arc));
+      }
+    } catch (err) {
+      if (stalled) problem = "Die Verbindung zum NAS ist abgebrochen.";
+      else if (!cancelled) problem = err instanceof TypeError ? "Die Verbindung zum NAS ist abgebrochen." : err.message;
+    }
+    clearInterval(watchdog);
+    changeRunning(-1, true);
+    const there = `${fileCount(saved)} in „${root.name}“`;
+    const also = skipped ? `, ${skipped} übersprungen` : "";
+    if (cancelled) {
+      win.fail(`Abgebrochen. ${saved ? `Schon gespeichert: ${there}.` : "Es wurde keine Datei gespeichert."} ${left}`);
+    } else if (problem && !saved && !missing.length) {
+      win.fail(problem);  // schon die Dateiliste kam nicht an
+    } else if (problem || missing.length) {
+      win.fail(`${problem ? problem + " " : ""}${there} gespeichert${also}. Nicht alles ist da:`);
+      if (missing.length) win.missing(missing);
+    } else {
+      win.finish(saved || skipped ? `✓ ${there} gespeichert${also} (${formatSize(written)})` : `✓ Ordner in „${root.name}“ angelegt, darin sind keine Dateien`);
+    }
+  }
+
+  // Ohne Dialog kann eine Seite keine Ordner anlegen: Die Struktur bleibt dann nur in einem ZIP erhalten
+  async function itemsWithoutPicker(job) {
+    if (!job.hasDirs) { itemsByBrowser(job); return; }
+    const yes = await askConfirm({
+      title: "Ordner als ZIP laden?",
+      text: `Dein Browser erlaubt PiNAS nicht, Ordner auf dem PC anzulegen. Mit der Ordnerstruktur geht es hier deshalb nur als eine ZIP-Datei.`,
+      ok: "Als ZIP laden",
+    });
+    if (yes) downloadByBrowser(job.zip);
+  }
+
+  // Der Browser lädt jede Datei selbst in seinen Download-Ordner. Wie weit er ist, meldet wie sonst der Server
+  function itemsByBrowser(job) {
+    let cancelled = false, id = null;
+    const win = transferWindow("Herunterladen", () => {
+      cancelled = true;
+      if (id) post(`/api/uebertragung/${id}/abbrechen`).catch(() => {});
+    });
+    win.what(`Dateiliste wird geholt … (aus ${job.dest})`);
+    if (matchMedia("(hover: hover)").matches) {
+      win.note(`Die Dateien landen einzeln im Download-Ordner deines Browsers. Beim ersten Mal kann er fragen, ob PiNAS mehrere Dateien laden darf; dann bitte erlauben.`,
+        "pinas.download.einzeln.hinweis");
+    }
+    (async () => {
+      changeRunning(1, false);
+      const missing = [];
+      let sent = 0, stopped = null, written = 0;
+      try {
+        const list = await fileList(job);
+        list.skipped.forEach((arc) => missing.push(`${arc}: ließ sich auf dem NAS nicht lesen`));
+        const total = list.files.reduce((sum, f) => sum + f.size, 0);
+        for (const [i, f] of list.files.entries()) {
+          if (cancelled || stopped) break;
+          win.what(`„${nameOf(f.arc)}“ (${i + 1} von ${list.files.length}) aus ${job.dest}`);
+          win.progress(written, total, list.files.length - i);
+          id = newId();
+          clickDownload(withId(fileHref(list, f), id), nameOf(f.arc));
+          const started = performance.now();
+          let seen = false, ok = null;
+          while (ok === null && !cancelled) {
+            let st = null;
+            try {
+              const r = await fetch(`/api/uebertragung/${id}`, { cache: "no-store", credentials: "same-origin" });
+              if (r.ok) st = await r.json();
+            } catch {}
+            if (st?.known) {
+              seen = true;
+              win.progress(Math.min(written + st.done, total), total, list.files.length - i);
+              if (st.finished) ok = st.done >= st.size;
+            } else if (performance.now() - started > (seen ? 15000 : START_WAIT)) {
+              stopped = seen ? "Die Verbindung zum NAS ist abgebrochen."
+                : "Dein Browser hat den nächsten Download nicht gestartet. Bitte erlaube dieser Seite, mehrere Dateien zu laden, und versuche es noch einmal.";
+              break;
+            }
+            if (ok === null && !stopped) await sleep(300);
+          }
+          if (cancelled) break;
+          if (ok) sent++;
+          if (stopped) list.files.slice(i).forEach((rest) => missing.push(rest.arc));
+          else if (!ok) missing.push(`${f.arc}: im Browser abgebrochen oder Verbindung getrennt`);
+          written += f.size;
+        }
+      } catch (err) {
+        stopped = err instanceof TypeError ? "Die Verbindung zum NAS ist abgebrochen." : err.message;
+      }
+      changeRunning(-1, false);
+      if (cancelled) {
+        win.fail(`Abgebrochen. Schon übertragen: ${fileCount(sent)}.`);
+      } else if (stopped && !sent && !missing.length) {
+        win.fail(stopped);  // schon die Dateiliste kam nicht an
+      } else if (stopped || missing.length) {
+        win.fail(`${stopped ? stopped + " " : ""}${fileCount(sent)} übertragen. Nicht alles ist da:`);
+        if (missing.length) win.missing(missing);
+      } else {
+        win.finish(`✓ ${fileCount(sent)} übertragen (${formatSize(written)}) – gespeichert hat sie dein Browser`);
+      }
     })();
   }
 
@@ -700,5 +1026,5 @@
     win.fail(text);
   }
 
-  window.PiNASTransfer = { upload, download, copy, notice, sync };
+  window.PiNASTransfer = { upload, download, downloadItems, copy, notice, sync };
 })();

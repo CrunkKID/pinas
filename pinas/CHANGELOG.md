@@ -6,6 +6,15 @@ Schreibweise ab Version 1.3.1: unter „## x.y.z“ die Überschriften „### Ne
 darunter Punkte mit „- “. Nur Überschriften verwenden, zu denen es etwas gibt. Sicherheitspunkte ehrlich und verständlich schreiben,
 aber ohne Anleitung zum Ausnutzen. Ältere Abschnitte ohne Überschriften werden als einfache Liste angezeigt.
 
+## 1.6.2
+### Neu
+- Mehrere ausgewählte Dateien und Ordner kommen jetzt einzeln statt als ZIP, mit Ordnerstruktur, wenn der Browser den Zielordner-Dialog erlaubt. Liegt dort schon etwas, fragt PiNAS, ob es ersetzt oder übersprungen werden soll. Eine ZIP-Datei gibt es nur noch nach ausdrücklicher Rückfrage, wenn der Browser keine Ordner anlegen darf
+
+### Verbessert
+- Übertragungsfenster im Stil von Windows: Restzeit in groben Stufen, verbleibende Elemente und Geschwindigkeit
+- Neue Karte „Optionen“ unten links mit Konto und für Administratoren Benutzer, Laufwerk, Update und den System-Optionen. Oben bleiben Dateien, Papierkorb und Dashboard. Eine eigene Reihenfolge dieser drei Reiter bleibt erhalten
+- Das Übertragungsfenster zeigt weniger Hinweise, die nur auf bestimmte Browser oder Zwischendateien eingingen
+
 ## 1.6.1
 ### Neu
 - Download-Begrenzung im Dashboard unter „Optionen“ (nur für Administratoren): begrenzt, was PiNAS ins Netz sendet, damit für andere Geräte Platz im Netzwerk bleibt. Das gilt für Downloads im Browser und fürs Netzlaufwerk zusammen. Hochladen zum NAS wird nicht gebremst

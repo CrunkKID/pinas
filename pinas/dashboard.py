@@ -747,15 +747,16 @@ def index():
                            timer=powertimer.view(current_app.config) if g.user["is_admin"] else None)
 
 
-# Reiter der Seitenleiste in der Standard-Reihenfolge (Beschriftungen und Links stehen in base.html)
-NAV_TABS = ("files", "trash", "dashboard", "users", "disk", "update", "account")
-NAV_ADMIN = {"users", "disk", "update"}
+# Sortierbare Reiter der Seitenleiste in der Standard-Reihenfolge (Beschriftungen und Links stehen in base.html).
+# Konto, Benutzer, Laufwerk und Update stehen seit 1.6.2 fest in der Karte „Optionen“ darunter
+NAV_TABS = ("files", "trash", "dashboard")
 
 
 def _merged_nav(saved) -> list[str]:
-    """Gespeicherte Reihenfolge ohne Unbekanntes. Was darin fehlt (neue Reiter aus einem Update),
-    kommt hinter seinen Vorgänger aus der Standard-Reihenfolge."""
-    order = [t for t in dict.fromkeys(saved if isinstance(saved, list) else []) if t in NAV_TABS]
+    """Gespeicherte Reihenfolge ohne Unbekanntes (auch ohne früher hier stehende Reiter). Was darin fehlt
+    (neue Reiter aus einem Update), kommt hinter seinen Vorgänger aus der Standard-Reihenfolge."""
+    names = [t for t in saved if isinstance(t, str)] if isinstance(saved, list) else []
+    order = [t for t in dict.fromkeys(names) if t in NAV_TABS]
     for i, tab in enumerate(NAV_TABS):
         if tab not in order:
             before = next((t for t in reversed(NAV_TABS[:i]) if t in order), None)
@@ -764,15 +765,14 @@ def _merged_nav(saved) -> list[str]:
 
 
 def nav_order() -> list[str]:
-    """Reiter des angemeldeten Benutzers; Admin-Reiter sehen nur Administratoren, egal was gespeichert ist."""
+    """Reihenfolge der Reiter des angemeldeten Benutzers."""
     try:
         row = get_db().execute("SELECT value FROM settings WHERE username = ? AND key = 'nav'",
                                (g.user["username"],)).fetchone()
         saved = json.loads(row["value"]) if row else []
     except Exception:  # noqa: BLE001 – die Leiste steht auf jeder Seite und darf keine davon mitreißen
         saved = []
-    order = _merged_nav(saved)
-    return order if g.user["is_admin"] else [t for t in order if t not in NAV_ADMIN]
+    return _merged_nav(saved)
 
 
 @bp.app_context_processor

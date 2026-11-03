@@ -58,27 +58,45 @@
         'files': ('Dateien', url_for('files.browse', root=home_root), request.blueprint == 'files'),
         'trash': ('Papierkorb', url_for('trash.browse', root=home_root), request.blueprint == 'trash'),
         'dashboard': ('Dashboard', url_for('dashboard.index'), request.blueprint == 'dashboard'),
-        'users': ('Benutzer', url_for('admin.index'), request.blueprint == 'admin'),
-        'disk': ('Laufwerk', url_for('disk.index'), request.blueprint == 'disk'),
-        'update': ('Update', url_for('updates.index'), request.blueprint == 'updates'),
-        'account': ('Konto', url_for('auth.account'), request.endpoint == 'auth.account'),
       } %}
       {% for id in nav_order %}
       <a href="{{ tabs[id][1] }}" class="{{ 'active' if tabs[id][2] }}" data-tab="{{ id }}" draggable="false">{{ tabs[id][0] }}</a>
       {% endfor %}
     </div>
-    <div class="nav-tools">
-      <button type="button" class="nav-tool" id="nav-sort" aria-pressed="false" title="Reiter sortieren" aria-label="Reiter sortieren">⇅<span class="nav-tool-text"> Reiter sortieren</span></button>
-      <div class="nav-panel" id="nav-panel" hidden>
-        <p class="nav-hint">Ziehen oder antippen und mit den Pfeilen verschieben.</p>
-        <div class="nav-buttons">
-          <button type="button" class="nav-tool" id="nav-earlier" title="Nach vorne" aria-label="Ausgewählten Reiter nach vorne">▲</button>
-          <button type="button" class="nav-tool" id="nav-later" title="Nach hinten" aria-label="Ausgewählten Reiter nach hinten">▼</button>
-          <button type="button" class="nav-tool" id="nav-reset">Standard</button>
+    {# Karte „Optionen“: am PC immer unten sichtbar, auf dem Handy ein Menü am Ende der Leiste. Die Rechte prüft weiter jede Seite selbst #}
+    <details class="nav-card" id="nav-card">
+      <summary class="{{ 'has-active' if request.blueprint in ('admin', 'disk', 'updates') or request.endpoint == 'auth.account' }}" title="Optionen" aria-label="Optionen">⚙<span class="nav-card-label"> Optionen</span></summary>
+      <div class="nav-card-body">
+        <a href="{{ url_for('auth.account') }}" class="{{ 'active' if request.endpoint == 'auth.account' }}">Konto</a>
+        {% if user.is_admin %}
+        <a href="{{ url_for('admin.index') }}" class="{{ 'active' if request.blueprint == 'admin' }}">Benutzer</a>
+        <a href="{{ url_for('disk.index') }}" class="{{ 'active' if request.blueprint == 'disk' }}">Laufwerk</a>
+        <a href="{{ url_for('updates.index') }}" class="{{ 'active' if request.blueprint == 'updates' }}">Update</a>
+        <a href="{{ url_for('dashboard.index') }}#optionen">System-Optionen</a>
+        {% endif %}
+        <div class="nav-tools">
+          <button type="button" class="nav-tool" id="nav-sort" aria-pressed="false" title="Reiter sortieren" aria-label="Reiter sortieren">⇅<span class="nav-tool-text"> Reiter sortieren</span></button>
+          <div class="nav-panel" id="nav-panel" hidden>
+            <p class="nav-hint">Ziehen oder antippen und mit den Pfeilen verschieben.</p>
+            <div class="nav-buttons">
+              <button type="button" class="nav-tool" id="nav-earlier" title="Nach vorne" aria-label="Ausgewählten Reiter nach vorne">▲</button>
+              <button type="button" class="nav-tool" id="nav-later" title="Nach hinten" aria-label="Ausgewählten Reiter nach hinten">▼</button>
+              <button type="button" class="nav-tool" id="nav-reset">Standard</button>
+            </div>
+          </div>
+          <p class="nav-status" id="nav-status" role="status"></p>
         </div>
       </div>
-      <p class="nav-status" id="nav-status" role="status"></p>
-    </div>
+    </details>
+    {# Schon hier, damit die Karte beim Laden nicht sichtbar auf- oder zuklappt #}
+    <script>
+      window.pinasNavCardDefault = () => {
+        let closed = false;
+        try { closed = localStorage.getItem("pinasNavCard") === "zu"; } catch {}
+        document.getElementById("nav-card").open = innerWidth > 760 && innerHeight >= 480 && !closed;
+      };
+      pinasNavCardDefault();
+    </script>
     </div>
   </nav>
   <div class="app-main">

@@ -36,9 +36,6 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
   <button type="button" class="btn-sm" id="dash-reset" hidden>Auf Standard zurücksetzen</button>
   <button type="button" class="btn-sm" id="dash-pin" aria-pressed="{{ 'true' if layout.pinned else 'false' }}">📌 {{ 'Festgepinnt' if layout.pinned else 'Festpinnen' }}</button>
   <button type="button" class="btn-sm" id="dash-edit"{% if layout.pinned %} disabled title="Zum Anpassen zuerst das Festpinnen lösen"{% endif %}>✎ Dashboard anpassen</button>
-  {% if user.is_admin %}
-  <button type="button" class="btn-sm" id="dash-options-btn" aria-haspopup="dialog">⚙ Optionen</button>
-  {% endif %}
 </div>
 
 <dialog id="dash-add" class="dialog" aria-labelledby="dash-add-title">
@@ -378,10 +375,16 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
 <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
 <script src="{{ url_for('static', filename='dashboard-edit.js') }}"></script>
 <script>
-  // Optionsfenster (nur Admins)
+  // Optionsfenster (nur Admins): öffnet über „System-Optionen“ in der Karte links, auch von anderen Seiten (#optionen)
   const optDialog = document.getElementById("dash-options");
   if (optDialog) {
-    document.getElementById("dash-options-btn").addEventListener("click", () => optDialog.showModal());
+    const openFromLink = () => {
+      if (location.hash !== "#optionen") return;
+      history.replaceState(null, "", location.pathname + location.search);  // damit derselbe Link wieder wirkt
+      if (!optDialog.open) optDialog.showModal();
+    };
+    addEventListener("hashchange", openFromLink);
+    openFromLink();
     document.getElementById("dash-options-cancel").addEventListener("click", () => optDialog.close());
     optDialog.addEventListener("click", (e) => { if (e.target === optDialog) optDialog.close(); });
   }
