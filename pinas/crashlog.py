@@ -239,6 +239,9 @@ def report() -> str:
         pass
     parts = [f"PiNAS-Fehlerbericht (Kurzfassung, der Notfallhelfer war nicht verfügbar)\nVersion: {_version}\n"]
     for e in read(100):
+        # Wie beim Notfallhelfer ohne Benutzer- und Dateinamen
+        context = {k: v for k, v in (e.get("context") or {}).items() if k not in ("benutzer", "argumente")}
         parts.append(f"\n--- {e['time']}  {e.get('kind')}  {e.get('title')}\n{e.get('text', '')}\n"
-                     f"{e.get('context', '')}\n{e.get('trace', '')}\n")
-    return mask("".join(parts))
+                     f"{context}\n{e.get('trace', '')}\n")
+    data = os.environ.get("PINAS_DATA", "/srv/nas").rstrip("/")
+    return re.sub(re.escape(data) + r"/[^\n'\"]*", data + "/[Name entfernt]", mask("".join(parts)))

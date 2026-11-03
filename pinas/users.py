@@ -1,5 +1,6 @@
 """Benutzerverwaltung: App-Datenbank, Samba-Konto und privater Ordner bleiben synchron."""
 import re
+import secrets
 import sqlite3
 from pathlib import Path
 
@@ -11,9 +12,10 @@ USERNAME_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
 RESERVED = {
     "root", "pinas", "daemon", "bin", "sys", "sync", "games", "man", "lp",
     "mail", "news", "uucp", "proxy", "www-data", "backup", "list", "irc", "nobody",
-    "systemd-network", "systemd-resolve", "messagebus", "sshd", "avahi", "nasusers",
+    "systemd-network", "systemd-resolve", "messagebus", "sshd", "avahi", "nasusers", "pinasprivat", "piadmin",
 }
 MIN_PASSWORD = 8
+_dummy_hash = ""  # für unbekannte Benutzernamen, siehe verify
 
 
 class UserError(Exception):
@@ -49,10 +51,14 @@ def count_admins(conn: sqlite3.Connection) -> int:
 
 
 def verify(conn: sqlite3.Connection, username: str, password: str):
+    global _dummy_hash
     row = get_user(conn, (username or "").strip().lower())
-    if row and check_password_hash(row["pw_hash"], password or ""):
-        return row
-    return None
+    if row is None:
+        # Genauso lange rechnen wie bei einem echten Konto: Die Antwortzeit verrät nicht, welche Namen es gibt
+        _dummy_hash = _dummy_hash or generate_password_hash(secrets.token_hex(16))
+        check_password_hash(_dummy_hash, password or "")
+        return None
+    return row if check_password_hash(row["pw_hash"], password or "") else None
 
 
 def create_user(conn, helper: SystemHelper, users_dir: Path, username: str, password: str, is_admin: bool):

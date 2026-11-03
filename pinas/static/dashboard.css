@@ -2,7 +2,7 @@
    unten bündig die Zeilen „Bezeichnung – Wert“, die nicht umbrechen. */
 /* Spalten so, dass keine Lücke bleibt: 8 Kacheln gehen in 2 und 4 Spalten auf, in 3 Spalten ist „Festplatte“ doppelt breit.
    Die Seite ist je Spaltenzahl begrenzt (Kachel höchstens 340 px), damit auch die Bereiche darunter bündig enden. */
-.dash-grid { grid-template-columns: minmax(0, 1fr); }
+.dash-grid { grid-template-columns: minmax(0, 1fr); grid-auto-flow: dense; }  /* dense: selbst gewählte Breiten lassen keine Lücke */
 .dash-grid .disk-card { grid-column: auto; }
 @media (min-width: 560px) {
   .dash-page { max-width: calc(696px + 2 * var(--gutter)); }
@@ -18,6 +18,25 @@
   .dash-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .dash-grid .disk-card { grid-column: auto; }
 }
+
+/* Selbst gewählte Breite (Anpassen-Modus): nie mehr Spalten, als das Fenster gerade hat */
+@media (min-width: 560px) {
+  .dash-grid [data-span="1"] { grid-column: auto; }
+  .dash-grid [data-span="2"], .dash-grid [data-span="3"], .dash-grid [data-span="4"] { grid-column: span 2; }
+}
+@media (min-width: 1030px) {
+  .dash-grid [data-span="3"], .dash-grid [data-span="4"] { grid-column: span 3; }
+}
+@media (min-width: 1500px) {
+  .dash-grid [data-span="4"] { grid-column: span 4; }
+}
+.dash-edit .tile-ctl { flex-wrap: wrap; }
+/* Schalter und Name in einer Zeile, die Knöpfe beisammen in der nächsten */
+.dash-edit .dash-grid .tile-ctl .tc-name { flex: 1 1 calc(100% - 3.5rem); }
+@media (max-width: 559px) { .tc-size { display: none; } }
+.dash-add-list { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: .5rem; }
+.dash-add-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+#dash-pin[aria-pressed="true"] { border-color: var(--accent); }
 
 .dash-grid .stat { display: flex; flex-direction: column; gap: .5rem; }
 .dash-grid .stat > small:first-of-type { margin-bottom: .1rem; font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }

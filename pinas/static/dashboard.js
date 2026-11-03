@@ -48,6 +48,16 @@
       if (s.io) { set("io-read", fmt(s.io.read)); set("io-written", fmt(s.io.written)); }
       if (s.net) { set("net-rx-total", fmt(s.net.rx)); set("net-tx-total", fmt(s.net.tx)); }
       set("throttled", s.throttled || "–");
+      if (s.disk_state) {
+        const ds = s.disk_state;
+        set("ds-text", ds.text);
+        set("ds-fs", ds.fs);
+        set("ds-since", ds.since);
+        set("ds-check", ds.check || "–");
+        set("ds-at", ds.check_at || "–");
+        const dot = document.getElementById("ds-dot");
+        if (dot) dot.className = `dot ${ds.check_color || "off"}`;
+      }
       const pct = s.disk.total ? (s.disk.used / s.disk.total) * 100 : 0;
       set("disk-used", fmt(s.disk.used));
       set("disk-free", fmt(s.disk.free));

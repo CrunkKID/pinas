@@ -6,6 +6,20 @@ Schreibweise ab Version 1.3.1: unter „## x.y.z“ die Überschriften „### Ne
 darunter Punkte mit „- “. Nur Überschriften verwenden, zu denen es etwas gibt. Sicherheitspunkte ehrlich und verständlich schreiben,
 aber ohne Anleitung zum Ausnutzen. Ältere Abschnitte ohne Überschriften werden als einfache Liste angezeigt.
 
+## 1.6.0
+### Neu
+- Dashboard frei gestalten: Kacheln verschieben, breiter und schmaler machen, ein- und ausblenden, hinzufügen und das Ganze festpinnen. Die Anordnung gilt pro Benutzer auf allen Geräten
+- Neue Kachel „Festplatten-Zustand“: zeigt, ob die Platte läuft oder schläft, das Dateisystem und für Administratoren die letzte Prüfung. Sie lässt sich im Dashboard über „Kachel hinzufügen“ einblenden
+- Die Reiter der Seitenleiste lassen sich sortieren: mit der Maus ziehen oder über „Reiter sortieren“, auch auf dem Handy und per Tastatur. Die Reihenfolge gilt pro Benutzer auf allen Geräten
+
+### Sicherheit
+- Ohne Anmeldung ließen sich sehr große Anfragen an PiNAS schicken, die vorübergehend Platz auf der Festplatte belegten. Anfragen sind jetzt auf 64 MB begrenzt, große Dateien werden weiter in Teilstücken hochgeladen
+- Nach dem Anmelden konnte ein präparierter Link auf eine fremde Seite weiterleiten. Das ist behoben
+- Der Fehlerbericht konnte in einigen Protokollzeilen Datei- und Ordnernamen enthalten. Diese werden jetzt entfernt, auch die Namen von Ordnerfreigaben
+- Der Hinweis auf laufende Übertragungen nannte anderen Benutzern den Dateinamen. Er bleibt jetzt dem eigenen Konto und Administratoren vorbehalten
+- Die Antwortzeit der Anmeldung verrät nicht mehr, ob es einen Benutzernamen gibt
+- Update-Pakete, die sich ausgepackt extrem vergrößern, werden abgelehnt
+
 ## 1.5.0
 ### Neu
 - Dateien bearbeiten wie im Explorer: Kopieren, Ausschneiden und Einfügen, auch mit Strg+C, Strg+X und Strg+V, dazu „Kopieren nach“ und „Verschieben nach“. Ziehen auf einen Ordner verschiebt, mit gedrückter Strg-Taste kopiert es. Mehrere Einträge lassen sich auf einmal löschen

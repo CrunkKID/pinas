@@ -37,6 +37,13 @@ def helper():
     return current_app.extensions["pinas_helper"]
 
 
+def local_path(target: str) -> bool:
+    """Nur Pfade auf diesem NAS als Ziel einer Weiterleitung. Browser lesen „/\\“ wie „//“ und überspringen
+    Steuerzeichen, beides führte sonst auf eine fremde Seite."""
+    return (target.startswith("/") and not target.startswith(("//", "/\\"))
+            and not any(c < " " or c == "\x7f" for c in target))
+
+
 def csrf_token() -> str:
     if "csrf" not in session:
         session["csrf"] = secrets.token_urlsafe(32)
@@ -144,7 +151,7 @@ def login():
         events.log("login", username=row["username"])
         nxt = request.args.get("next", "")
         # Nur relative Pfade zulassen (kein Open Redirect)
-        if not nxt.startswith("/") or nxt.startswith("//"):
+        if not local_path(nxt):
             nxt = url_for("index")
         return redirect(nxt)
     return render_template("login.html")

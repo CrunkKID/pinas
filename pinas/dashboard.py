@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from flask import Blueprint, Response, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
 from . import crashlog, events, powertimer, transfers
-from .auth import admin_required, helper, login_required
+from .auth import admin_required, helper, local_path, login_required
 from .config import disk_is_off
 from .db import get_db
 from .helper import HelperError
@@ -354,7 +354,36 @@ def stats() -> dict:
         "throttled": throttled(),
         "disk": {"total": du.total, "used": du.used, "free": du.free, "path": str(data_dir),
                  "is_mount": os.path.ismount(data_dir)},
+        "disk_state": disk_state(),
     }
+
+
+def disk_state() -> dict:
+    """Kachel „Festplatten-Zustand“. Liest nur Merker und Protokolldateien, weckt die Platte also nicht.
+    Das Prüfergebnis steht im Reiter Laufwerk und sehen nur Administratoren."""
+    from . import disk  # disk.py importiert dieses Modul
+    data_dir = str(current_app.config["DATA_DIR"])
+    state = {"text": "Läuft", "color": "ok", "fs": "–", "since": "–", "check": None, "check_at": None}
+    if disk_is_off(current_app.config):
+        return {**state, "text": "Ausgeschaltet", "color": "off"}
+    if not os.path.ismount(data_dir):
+        return {**state, "text": "Keine eigene Platte", "color": "off"}
+    try:
+        state["fs"] = disk.data_fstype() or "–"
+        asleep = disk.power_status() or {}
+        if asleep.get("asleep_since"):
+            state.update(text="Ruhezustand", since=asleep.get("since_text") or "–")
+        if g.get("user") and g.user["is_admin"]:
+            check = disk.check_view(current_app.config)
+            state["check"], state["check_at"], state["check_color"] = "Noch nie geprüft", "–", "off"
+            if check and check.get("running"):
+                state.update(check="Läuft gerade", check_at=check.get("started_text") or "–", check_color="warn")
+            elif check:
+                state.update(check=check["title"], check_at=check.get("finished_text") or check.get("started_text") or "–",
+                             check_color={"ok": "ok", "warn": "warn"}.get(check["kind"], "bad"))
+    except Exception:  # noqa: BLE001 – eine einzelne Kachel darf das Dashboard nicht mitreißen
+        crashlog.record("web", "Der Festplatten-Zustand ließ sich nicht lesen", level="warn", key="disk_state")
+    return state
 
 
 RUN_DIR = Path("/run/pinas")  # Zustand der Ein/Aus-Knöpfe (geschrieben von pinas-helper)
@@ -420,27 +449,49 @@ def power(action):
         flash(str(exc), "error")
     # Zurück auf die Seite, von der aus geklickt wurde (die Knöpfe stehen in der Kopfzeile jeder Seite)
     ref = urlparse(request.referrer or "")
-    if ref.netloc == request.host and ref.path.startswith("/"):
+    if ref.netloc == request.host and local_path(ref.path):
         return redirect(ref.path + (f"?{ref.query}" if ref.query else ""))
     return redirect(url_for("dashboard.index"))
 
 
 # Kacheln und Bereiche des Dashboards in der Standard-Reihenfolge
-TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "power", "timer", "events", "errors", "services", "devices"]
+GRID_TILES = ["disk", "uptime", "io", "net", "temp", "cpu", "mem", "power", "diskstate"]
+TILES = GRID_TILES + ["timer", "events", "errors", "services", "devices"]
+# Zum Hinzufügen im Anpassen-Modus: bleiben ausgeblendet, bis jemand sie einschaltet
+OPTIONAL_TILES = {"diskstate"}
+MAX_SPAN = 4  # breiter als die Spaltenzahl wird eine Kachel nie, das begrenzt dashboard.css
 
 
-def layout() -> dict:
-    """Persönliche Anordnung des angemeldeten Benutzers: Reihenfolge und ausgeblendete Kacheln."""
+def _names(value) -> list[str]:
+    return [t for t in dict.fromkeys(x for x in value if isinstance(x, str)) if t in TILES] if isinstance(value, list) else []
+
+
+def _sizes(value) -> dict:
+    """Breite in Spalten; 1 ist erlaubt, weil „Festplatte“ sonst je nach Fenster doppelt breit ist."""
+    if not isinstance(value, dict):
+        return {}
+    return {t: n for t, n in value.items() if t in GRID_TILES and type(n) is int and 1 <= n <= MAX_SPAN}
+
+
+def _saved_layout() -> dict:
     row = get_db().execute("SELECT value FROM settings WHERE username = ? AND key = 'dashboard'",
                            (g.user["username"],)).fetchone()
     try:
         saved = json.loads(row["value"]) if row else {}
     except ValueError:
         saved = {}
-    order = [t for t in saved.get("order", []) if t in TILES]
-    order = list(dict.fromkeys(order)) + [t for t in TILES if t not in order]  # neue Kacheln hinten anhängen
-    hidden = [t for t in saved.get("hidden", []) if t in TILES]
-    return {"order": order, "hidden": hidden, "pos": {t: i for i, t in enumerate(order)}}
+    return saved if isinstance(saved, dict) else {}
+
+
+def layout() -> dict:
+    """Persönliche Anordnung: Reihenfolge, ausgeblendete Kacheln, Breiten, festgepinnt.
+    Was angezeigt werden darf, entscheidet die Vorlage: Admin-Kacheln erscheinen dort nur für Administratoren."""
+    saved = _saved_layout()
+    known = _names(saved.get("order"))
+    order = known + [t for t in TILES if t not in known]  # neue Kacheln hinten anhängen
+    hidden = _names(saved.get("hidden")) + [t for t in OPTIONAL_TILES if t not in known]
+    return {"order": order, "hidden": hidden, "pos": {t: i for i, t in enumerate(order)},
+            "sizes": _sizes(saved.get("sizes")), "pinned": saved.get("pinned") is True}
 
 
 # Systemweite Optionen, die nur Administratoren ändern (in settings unter dem Benutzernamen "")
@@ -661,18 +712,83 @@ def index():
                            timer=powertimer.view(current_app.config) if g.user["is_admin"] else None)
 
 
+# Reiter der Seitenleiste in der Standard-Reihenfolge (Beschriftungen und Links stehen in base.html)
+NAV_TABS = ("files", "trash", "dashboard", "users", "disk", "update", "account")
+NAV_ADMIN = {"users", "disk", "update"}
+
+
+def _merged_nav(saved) -> list[str]:
+    """Gespeicherte Reihenfolge ohne Unbekanntes. Was darin fehlt (neue Reiter aus einem Update),
+    kommt hinter seinen Vorgänger aus der Standard-Reihenfolge."""
+    order = [t for t in dict.fromkeys(saved if isinstance(saved, list) else []) if t in NAV_TABS]
+    for i, tab in enumerate(NAV_TABS):
+        if tab not in order:
+            before = next((t for t in reversed(NAV_TABS[:i]) if t in order), None)
+            order.insert(order.index(before) + 1 if before else 0, tab)
+    return order
+
+
+def nav_order() -> list[str]:
+    """Reiter des angemeldeten Benutzers; Admin-Reiter sehen nur Administratoren, egal was gespeichert ist."""
+    try:
+        row = get_db().execute("SELECT value FROM settings WHERE username = ? AND key = 'nav'",
+                               (g.user["username"],)).fetchone()
+        saved = json.loads(row["value"]) if row else []
+    except Exception:  # noqa: BLE001 – die Leiste steht auf jeder Seite und darf keine davon mitreißen
+        saved = []
+    order = _merged_nav(saved)
+    return order if g.user["is_admin"] else [t for t in order if t not in NAV_ADMIN]
+
+
+@bp.app_context_processor
+def inject_nav():
+    return {"nav_order": nav_order()} if g.get("user") else {}
+
+
+@bp.post("/api/reiter-reihenfolge")
+@login_required
+def save_nav():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(error="Ungültige Anfrage."), 400
+    conn = get_db()
+    if data.get("reset"):
+        conn.execute("DELETE FROM settings WHERE username = ? AND key = 'nav'", (g.user["username"],))
+    else:
+        sent = data.get("order")
+        if not isinstance(sent, list) or len(sent) > 50:
+            return jsonify(error="Ungültige Anfrage."), 400
+        conn.execute("INSERT OR REPLACE INTO settings (username, key, value) VALUES (?, 'nav', ?)",
+                     (g.user["username"], json.dumps([t for t in sent if isinstance(t, str) and t in NAV_TABS])))
+    conn.commit()
+    return jsonify(ok=True, order=nav_order())
+
+
 @bp.post("/api/dashboard-layout")
 @login_required
 def save_layout():
-    data = request.get_json(silent=True) or {}
-    order = [t for t in data.get("order", []) if t in TILES]
-    hidden = [t for t in data.get("hidden", []) if t in TILES]
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(error="Ungültige Anfrage."), 400
     conn = get_db()
-    if data.get("reset"):
+    saved = _saved_layout()
+    if isinstance(data.get("pinned"), bool):
+        new = {**saved, "pinned": data["pinned"]}
+    elif saved.get("pinned") is True:
+        # Festgepinnt, auch gegen ein zweites Gerät, das noch im Anpassen-Modus steht
+        return jsonify(error="Das Dashboard ist festgepinnt."), 409
+    elif data.get("reset"):
         conn.execute("DELETE FROM settings WHERE username = ? AND key = 'dashboard'", (g.user["username"],))
+        conn.commit()
+        return jsonify(ok=True)
     else:
-        conn.execute("INSERT OR REPLACE INTO settings (username, key, value) VALUES (?, 'dashboard', ?)",
-                     (g.user["username"], json.dumps({"order": order, "hidden": hidden})))
+        sent = _names(data.get("order"))
+        # Was gerade nicht angezeigt wird (z. B. Ereignisse bei ausgeschaltetem Protokoll), behält seinen Zustand
+        kept = [t for t in _names(saved.get("hidden")) if t not in sent]
+        new = {"order": sent, "hidden": _names(data.get("hidden")) + kept,
+               "sizes": _sizes(data["sizes"]) if "sizes" in data else _sizes(saved.get("sizes"))}
+    conn.execute("INSERT OR REPLACE INTO settings (username, key, value) VALUES (?, 'dashboard', ?)",
+                 (g.user["username"], json.dumps(new)))
     conn.commit()
     return jsonify(ok=True)
 

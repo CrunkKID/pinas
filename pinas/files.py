@@ -679,7 +679,9 @@ def search_cancel():
 def transfer_busy():
     # Sperrt in der Kopfzeile Abmelden und Herunterfahren, solange etwas übertragen wird
     running, own = transfers.busy(), transfers.mine()
-    return jsonify(busy=bool(running), mine=bool(own), text=transfers.describe(own or running))
+    # Dateinamen anderer Benutzer bleiben verborgen, ohne Text zeigt die Seite einen allgemeinen Hinweis
+    shown = own or [e for e in running if g.user["is_admin"] or e["user"] == g.user["username"]]
+    return jsonify(busy=bool(running), mine=bool(own), text=transfers.describe(shown))
 
 
 @bp.get("/api/uebertragung/<tid>")

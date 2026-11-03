@@ -39,6 +39,7 @@ LOG = UPD / "update.log"
 INSTALLED = Path("/usr/local/share/pinas/src")  # Quellen der installierten Version (setup-system.sh)
 UPLOADS = Path("/var/lib/pinas/updates")     # hier legt die Weboberfläche hochgeladene Pakete ab
 MAX_SIZE = 50 * 1024 * 1024
+MAX_UNPACKED = 500 * 1024 * 1024             # so viel darf ein Paket ausgepackt belegen (ein echtes hat unter 1 MB)
 UNIT = "pinas-update-run"
 DURATIONS = UPD / "durations.json"           # Dauer der letzten Installationen (für die Schätzung)
 REBOOT_DELAY = 15                            # Sekunden bis zum Neustart nach erfolgreicher Installation
@@ -178,7 +179,13 @@ def stage(path_arg: str) -> dict:
     sha = hashlib.sha256(path.read_bytes()).hexdigest()
 
     with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tar:
-        members = tar.getmembers()
+        # Kleines Paket, das sich riesig auspackt: hier abbrechen, bevor es den Speicher füllt
+        members, unpacked = [], 0
+        for m in tar:
+            unpacked += m.size
+            if unpacked > MAX_UNPACKED:
+                raise UpdateError("Das Update-Paket ist ausgepackt zu groß.")
+            members.append(m)
         files = {}
         for m in members:
             name = m.name

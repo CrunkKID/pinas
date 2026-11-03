@@ -13,11 +13,11 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
 {# Kennung, Name, Position und An/Aus einer Kachel (Anpassen-Modus, siehe dashboard-edit.js) #}
 {% macro tile(id, title) -%}
-data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}"{% if id in layout.hidden %} data-off{% endif %}
+data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}"{% if id in layout.hidden %} data-off{% endif %}{% if layout.sizes.get(id) %} data-span="{{ layout.sizes[id] }}"{% endif %}
 {%- endmacro %}
 
 <div class="dash-bar">
-  <p class="dash-hint muted" hidden>Kacheln mit dem Schalter ein- oder ausblenden, mit den Pfeilen oder per Ziehen verschieben.</p>
+  <p class="dash-hint muted" hidden>Kacheln ziehen oder mit den Pfeilen verschieben, mit − und + schmaler oder breiter machen, mit dem Schalter ein- und ausblenden.</p>
   {# Herunterfahren/Neustart stehen in der Kopfzeile jeder Seite (base.html), hier nur die Festplatte #}
   {% if user.is_admin and not power.pending %}
   <div class="power-bar" role="group" aria-label="Festplatte ein- und ausschalten">
@@ -32,12 +32,21 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
     {% endif %}
   </div>
   {% endif %}
-  <button type="button" class="btn-sm" id="dash-reset" hidden>Zurücksetzen</button>
-  <button type="button" class="btn-sm" id="dash-edit">✎ Dashboard anpassen</button>
+  <button type="button" class="btn-sm" id="dash-add-btn" aria-haspopup="dialog" hidden>＋ Kachel hinzufügen</button>
+  <button type="button" class="btn-sm" id="dash-reset" hidden>Auf Standard zurücksetzen</button>
+  <button type="button" class="btn-sm" id="dash-pin" aria-pressed="{{ 'true' if layout.pinned else 'false' }}">📌 {{ 'Festgepinnt' if layout.pinned else 'Festpinnen' }}</button>
+  <button type="button" class="btn-sm" id="dash-edit"{% if layout.pinned %} disabled title="Zum Anpassen zuerst das Festpinnen lösen"{% endif %}>✎ Dashboard anpassen</button>
   {% if user.is_admin %}
   <button type="button" class="btn-sm" id="dash-options-btn" aria-haspopup="dialog">⚙ Optionen</button>
   {% endif %}
 </div>
+
+<dialog id="dash-add" class="dialog" aria-labelledby="dash-add-title">
+  <h3 id="dash-add-title">Kachel hinzufügen</h3>
+  <p id="dash-add-empty" class="muted">Alle Kacheln sind schon eingeblendet.</p>
+  <ul class="dash-add-list" id="dash-add-list"></ul>
+  <div class="dialog-actions"><button type="button" id="dash-add-close">Schließen</button></div>
+</dialog>
 
 {% if user.is_admin %}
 <dialog id="dash-options" class="dialog" aria-labelledby="dash-options-title">
@@ -182,6 +191,19 @@ data-tile="{{ id }}" data-title="{{ title }}" style="order: {{ layout.pos[id] }}
     <div class="bar"><span id="mem-bar" style="width: {{ (s.memory.used / s.memory.total * 100)|round(1) if s.memory else 0 }}%"></span></div>
     <dl class="kv">
       <div><dt>Gesamt</dt><dd>{{ (s.memory.total|filesize) if s.memory else '–' }}</dd></div>
+    </dl>
+  </div>
+  {% set ds = s.disk_state %}
+  <div class="card stat" {{ tile('diskstate', 'Festplatten-Zustand') }}>
+    <small>Festplatten-Zustand</small>
+    <div class="stat-main"><strong id="ds-text">{{ ds.text }}</strong></div>
+    <dl class="kv">
+      <div><dt>Dateisystem</dt><dd id="ds-fs">{{ ds.fs }}</dd></div>
+      <div><dt>Ruhezustand seit</dt><dd id="ds-since">{{ ds.since }}</dd></div>
+      {% if ds.check is not none or user.is_admin %}
+      <div><dt>Letzte Prüfung</dt><dd class="kv-text"><span class="dot {{ ds.check_color or 'off' }}" id="ds-dot"></span><span id="ds-check">{{ ds.check or '–' }}</span></dd></div>
+      <div><dt>Geprüft am</dt><dd id="ds-at">{{ ds.check_at or '–' }}</dd></div>
+      {% endif %}
     </dl>
   </div>
 </div>

@@ -51,16 +51,34 @@
   {# Reiter als Seitenleiste links (Handy: Leiste oben zum Wischen) #}
   <div class="app-layout">
   <nav class="subnav" aria-label="Hauptmenü">
+    <div class="nav-stick">
     <div class="inner">
-      <a href="{{ url_for('files.browse', root=home_root) }}" class="{{ 'active' if request.blueprint == 'files' }}">Dateien</a>
-      <a href="{{ url_for('trash.browse', root=home_root) }}" class="{{ 'active' if request.blueprint == 'trash' }}">Papierkorb</a>
-      <a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.blueprint == 'dashboard' }}">Dashboard</a>
-      {% if user.is_admin %}
-      <a href="{{ url_for('admin.index') }}" class="{{ 'active' if request.blueprint == 'admin' }}">Benutzer</a>
-      <a href="{{ url_for('disk.index') }}" class="{{ 'active' if request.blueprint == 'disk' }}">Laufwerk</a>
-      <a href="{{ url_for('updates.index') }}" class="{{ 'active' if request.blueprint == 'updates' }}">Update</a>
-      {% endif %}
-      <a href="{{ url_for('auth.account') }}" class="{{ 'active' if request.endpoint == 'auth.account' }}">Konto</a>
+      {# Reihenfolge pro Benutzer (dashboard.nav_order), sortieren siehe navsort.js #}
+      {% set tabs = {
+        'files': ('Dateien', url_for('files.browse', root=home_root), request.blueprint == 'files'),
+        'trash': ('Papierkorb', url_for('trash.browse', root=home_root), request.blueprint == 'trash'),
+        'dashboard': ('Dashboard', url_for('dashboard.index'), request.blueprint == 'dashboard'),
+        'users': ('Benutzer', url_for('admin.index'), request.blueprint == 'admin'),
+        'disk': ('Laufwerk', url_for('disk.index'), request.blueprint == 'disk'),
+        'update': ('Update', url_for('updates.index'), request.blueprint == 'updates'),
+        'account': ('Konto', url_for('auth.account'), request.endpoint == 'auth.account'),
+      } %}
+      {% for id in nav_order %}
+      <a href="{{ tabs[id][1] }}" class="{{ 'active' if tabs[id][2] }}" data-tab="{{ id }}" draggable="false">{{ tabs[id][0] }}</a>
+      {% endfor %}
+    </div>
+    <div class="nav-tools">
+      <button type="button" class="nav-tool" id="nav-sort" aria-pressed="false" title="Reiter sortieren" aria-label="Reiter sortieren">⇅<span class="nav-tool-text"> Reiter sortieren</span></button>
+      <div class="nav-panel" id="nav-panel" hidden>
+        <p class="nav-hint">Ziehen oder antippen und mit den Pfeilen verschieben.</p>
+        <div class="nav-buttons">
+          <button type="button" class="nav-tool" id="nav-earlier" title="Nach vorne" aria-label="Ausgewählten Reiter nach vorne">▲</button>
+          <button type="button" class="nav-tool" id="nav-later" title="Nach hinten" aria-label="Ausgewählten Reiter nach hinten">▼</button>
+          <button type="button" class="nav-tool" id="nav-reset">Standard</button>
+        </div>
+      </div>
+      <p class="nav-status" id="nav-status" role="status"></p>
+    </div>
     </div>
   </nav>
   <div class="app-main">
@@ -102,7 +120,8 @@
   <script>window.CSRF = "{{ csrf_token() }}";</script>
   <script src="{{ url_for('static', filename='confirm.js') }}"></script>
   <script src="{{ url_for('static', filename='countdown.js') }}"></script>
-  {% if user %}<script src="{{ url_for('static', filename='transfer.js') }}"></script>{% endif %}
+  {% if user %}<script src="{{ url_for('static', filename='transfer.js') }}"></script>
+  <script src="{{ url_for('static', filename='navsort.js') }}"></script>{% endif %}
   <script>
     // App-Funktion: geht nur über https mit vertrautem Zertifikat – sonst einfach weiter als Webseite
     if ("serviceWorker" in navigator && window.isSecureContext) {
