@@ -123,8 +123,8 @@ mkdir -p /etc/issue.d
 install -m 0755 -o root -g root "$SRC/deploy/pinas-issue" /usr/local/sbin/pinas-issue
 install -m 0644 "$SRC/deploy/pinas-issue.service" /etc/systemd/system/pinas-issue.service
 if [[ -d /etc/NetworkManager/dispatcher.d ]]; then
-  # Neue IP-Adresse: Zertifikat anpassen und Hinweis aktualisieren
-  printf '#!/bin/sh\n/usr/local/sbin/pinas-cert\n/usr/local/sbin/pinas-issue\n' > /etc/NetworkManager/dispatcher.d/90-pinas-issue
+  # Neue IP-Adresse: Zertifikat anpassen und Hinweis aktualisieren. Eine neu verbundene Netzwerkkarte bekommt die Download-Begrenzung
+  printf '#!/bin/sh\n/usr/local/sbin/pinas-cert\n/usr/local/sbin/pinas-issue\nif [ "$2" = up ]; then /usr/local/sbin/pinas-helper net-limit apply; fi\n' > /etc/NetworkManager/dispatcher.d/90-pinas-issue
   chmod 0755 /etc/NetworkManager/dispatcher.d/90-pinas-issue
 fi
 /usr/local/sbin/pinas-issue
@@ -161,6 +161,10 @@ systemctl enable pinas-diskpower.timer
 echo "==> Festplatte prüfen"
 install -m 0755 -o root -g root "$SRC/deploy/pinas-diskcheck" /usr/local/sbin/pinas-diskcheck
 install -m 0644 "$SRC/deploy/pinas-diskcheck.service" /etc/systemd/system/pinas-diskcheck.service
+
+echo "==> Download-Begrenzung"
+install -m 0644 "$SRC/deploy/pinas-netlimit.service" /etc/systemd/system/pinas-netlimit.service
+systemctl enable pinas-netlimit
 
 echo "==> Sauberes Abmelden der Festplatte beim Herunterfahren"
 # Nur die Reihenfolge, keine Abhängigkeit: Beim Herunterfahren enden Netzlaufwerk und Weboberfläche vor dem Aushängen,

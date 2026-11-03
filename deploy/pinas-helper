@@ -20,6 +20,7 @@
 #   pinas-helper timer-notice SEKUNDEN      (Abschalt-Timer: Hinweis mit Restzeit)
 #   pinas-helper timer-run WECKSEKUNDEN wait|force  (Abschalt-Timer: Platte abmelden, herunterfahren)
 #   pinas-helper factory-reset keep|wipe    (Werkseinstellungen; wipe leert zusätzlich die Festplatte)
+#   pinas-helper net-limit MBIT|0|apply     (Sendeleistung des Pi begrenzen, 0 = aus, apply = gespeicherten Wert anwenden)
 #   pinas-helper log-tail nginx|samba       (Ende des Fehlerprotokolls, für den Fehlerbericht)
 #   pinas-helper crash-report save|clear    (Fehlerbericht auf der Boot-Partition; save: Text über stdin)
 #
@@ -466,6 +467,32 @@ timer_run() {
   schedule_power poweroff 5 timer-shutdown
 }
 
+# ---------------------------------------------------------------- Netzwerk
+
+NET_LIMIT_FILE="/var/lib/pinas/net-limit"  # Obergrenze in Mbit/s; fehlt die Datei, ist nichts begrenzt
+
+# Begrenzt alles, was der Pi ins Netz sendet: Downloads im Browser und Lesen übers Netzlaufwerk, zusammen.
+# cake hält dabei auch die Wartezeit klein; fehlt das Kernel-Modul, geht es mit htb. Rückgabe 1: nicht überall geklappt
+net_limit_apply() {
+  local mbit="" dev path failed=0
+  if [[ -r "$NET_LIMIT_FILE" ]]; then mbit="$(cat "$NET_LIMIT_FILE")"; fi
+  [[ "$mbit" =~ ^[1-9][0-9]{0,4}$ ]] || mbit=""
+  for path in /sys/class/net/*; do
+    [[ -e "$path/device" ]] || continue  # nur echte Netzwerkkarten
+    dev="${path##*/}"
+    tc qdisc del dev "$dev" root 2>/dev/null || true
+    [[ -n "$mbit" ]] || continue
+    tc qdisc add dev "$dev" root cake bandwidth "${mbit}mbit" besteffort 2>/dev/null && continue
+    tc qdisc add dev "$dev" root handle 1: htb default 10 2>/dev/null \
+      && tc class add dev "$dev" parent 1: classid 1:10 htb rate "${mbit}mbit" 2>/dev/null \
+      && tc qdisc add dev "$dev" parent 1:10 fq_codel 2>/dev/null \
+      && continue
+    tc qdisc del dev "$dev" root 2>/dev/null || true
+    failed=1
+  done
+  return "$failed"
+}
+
 # ---------------------------------------------------------------- Fehlerprotokoll
 
 # Der Bericht liegt auf der Boot-Partition (FAT), dort lässt er sich an jedem PC lesen
@@ -539,6 +566,7 @@ factory_reset_run() {
   # (history.json) gehört zum Gerät und bleibt – wie ein Betriebsstundenzähler
   find "$STATE_DIR" -mindepth 1 ! -name history.json -delete
   install -d -m 0700 -o pinas -g pinas "$STATE_DIR" "$STATE_DIR/updates"
+  net_limit_apply || true  # die Datei ist weg: Begrenzung aus
   # Auch das Fehlerprotokoll und das dauerhafte Systemprotokoll nennen Benutzer und Geräte
   rm -f /boot/firmware/PINAS-FEHLERBERICHT.txt /boot/PINAS-FEHLERBERICHT.txt || true
   journalctl --rotate >/dev/null 2>&1 || true
@@ -608,6 +636,24 @@ case "$cmd" in
     [[ $# -eq 3 && "$2" =~ ^[0-9]{1,7}$ && ( "$3" == "wait" || "$3" == "force" ) ]] \
       || die "Aufruf: pinas-helper timer-run WECKSEKUNDEN wait|force"
     timer_run "$2" "$3"
+    exit 0
+    ;;
+  net-limit)
+    [[ $# -eq 2 ]] || die "Aufruf: pinas-helper net-limit MBIT|0|apply"
+    case "$2" in
+      apply) ;;
+      0) rm -f "$NET_LIMIT_FILE" ;;
+      *)
+        [[ "$2" =~ ^[1-9][0-9]{0,4}$ ]] || die "Ungültiger Wert: $2"
+        install -m 0644 -o root -g root /dev/null "$NET_LIMIT_FILE"
+        echo "$2" > "$NET_LIMIT_FILE"
+        ;;
+    esac
+    if ! net_limit_apply; then
+      # Halb begrenzt wäre schlimmer als gar nicht
+      [[ "$2" == "apply" ]] || { rm -f "$NET_LIMIT_FILE"; net_limit_apply || true; }
+      die "Die Begrenzung ließ sich nicht einschalten."
+    fi
     exit 0
     ;;
   log-tail)

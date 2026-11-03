@@ -9,6 +9,8 @@ rsync
 sudo
 hdparm
 sdparm
+# Download-Begrenzung (Programm tc)
+iproute2
 # Platten vom Windows-PC ohne Formatieren verwenden
 ntfs-3g
 exfatprogs

@@ -507,9 +507,42 @@ def options() -> dict:
     return {k: bool(saved.get(k, v)) for k, v in OPTION_DEFAULTS.items()}
 
 
+# Download-Begrenzung in Mbit/s, 0 = aus. Der Wert liegt in einer Datei von pinas-helper, der ihn auch nach dem Start anwendet
+NET_LIMITS = (0, 50, 100, 200, 300, 500)
+
+
+def net_limit() -> int:
+    try:
+        value = int((current_app.config["DB_PATH"].parent / "net-limit").read_text().strip())
+    except (OSError, ValueError):
+        return 0
+    return value if value > 0 else 0
+
+
+def _save_net_limit() -> bool:
+    """False: Die Begrenzung konnte nicht geändert werden, die Meldung steht schon da."""
+    try:
+        wanted = int(request.form.get("net_limit", ""))
+    except ValueError:
+        wanted = -1
+    if wanted not in NET_LIMITS:
+        flash("Ungültige Download-Begrenzung.", "error")
+        return False
+    if wanted == net_limit():
+        return True
+    try:
+        helper().net_limit(wanted)
+    except HelperError as exc:
+        flash(f"Die Download-Begrenzung ließ sich nicht ändern: {exc}", "error")
+        return False
+    events.log("setting", f"Download-Begrenzung auf {wanted} Mbit/s" if wanted else "Download-Begrenzung ausgeschaltet")
+    return True
+
+
 @bp.post("/dashboard/optionen")
 @admin_required
 def save_options():
+    limit_ok = _save_net_limit()
     new = {k: request.form.get(k) == "1" for k in OPTION_DEFAULTS}
     old = options()
     if old["log_events"] and not new["log_events"]:
@@ -525,7 +558,8 @@ def save_options():
             helper().samba_audit(new["log_events"])
         except HelperError as exc:
             flash(f"Zugriffe übers Netzlaufwerk werden nicht protokolliert: {exc}", "error")
-    flash("Optionen gespeichert.", "ok")
+    if limit_ok:
+        flash("Optionen gespeichert.", "ok")
     return redirect(url_for("dashboard.index"))
 
 
@@ -707,6 +741,7 @@ def index():
         event_rows = events.recent(current_app.config, EVENTS_IN_TILE)
     return render_template("dashboard.html", s=stats(), devices=devices, services=services,
                            data_alias=data_alias, layout=layout(), power=power_state(), options=opts,
+                           net_limit=net_limit(), net_limits=NET_LIMITS,
                            event_rows=event_rows,
                            errors=crashlog.summary() if g.user["is_admin"] else None,
                            timer=powertimer.view(current_app.config) if g.user["is_admin"] else None)

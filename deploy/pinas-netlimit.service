@@ -1,0 +1,10 @@
+[Unit]
+Description=PiNAS Download-Begrenzung anwenden
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pinas-helper net-limit apply
+
+[Install]
+WantedBy=multi-user.target

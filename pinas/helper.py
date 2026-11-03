@@ -95,6 +95,10 @@ class SystemHelper:
         force: auch wenn am Netzlaufwerk noch Dateien geöffnet sind."""
         self._run("timer-run", str(wake_seconds), "force" if force else "wait", timeout=120)
 
+    def net_limit(self, mbit: int) -> None:
+        """Was der Pi ins Netz sendet auf so viele Mbit/s begrenzen; 0 schaltet die Begrenzung aus."""
+        self._run("net-limit", str(mbit), timeout=60)
+
     def crash_report_clear(self) -> None:
         """Den Fehlerbericht auf der SD-Karte (Boot-Partition) löschen."""
         self._run("crash-report", "clear")

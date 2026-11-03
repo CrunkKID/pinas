@@ -6,6 +6,10 @@ Schreibweise ab Version 1.3.1: unter „## x.y.z“ die Überschriften „### Ne
 darunter Punkte mit „- “. Nur Überschriften verwenden, zu denen es etwas gibt. Sicherheitspunkte ehrlich und verständlich schreiben,
 aber ohne Anleitung zum Ausnutzen. Ältere Abschnitte ohne Überschriften werden als einfache Liste angezeigt.
 
+## 1.6.1
+### Neu
+- Download-Begrenzung im Dashboard unter „Optionen“ (nur für Administratoren): begrenzt, was PiNAS ins Netz sendet, damit für andere Geräte Platz im Netzwerk bleibt. Das gilt für Downloads im Browser und fürs Netzlaufwerk zusammen. Hochladen zum NAS wird nicht gebremst
+
 ## 1.6.0
 ### Neu
 - Dashboard frei gestalten: Kacheln verschieben, breiter und schmaler machen, ein- und ausblenden, hinzufügen und das Ganze festpinnen. Die Anordnung gilt pro Benutzer auf allen Geräten
